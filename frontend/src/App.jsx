@@ -16,6 +16,65 @@ export default function App() {
   const [commentText, setCommentText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
+  // Draggable Modal state
+  const [modalPosition, setModalPosition] = useState({ x: 100, y: 100 });
+  const [dragStart, setDragStart] = useState(null);
+
+  // Center modal initially when it is opened
+  useEffect(() => {
+    if (modalOpen) {
+      const width = 480;
+      const height = 450;
+      const x = Math.max(20, (window.innerWidth - width) / 2);
+      const y = Math.max(20, (window.innerHeight - height) / 2);
+      setModalPosition({ x, y });
+    }
+  }, [modalOpen]);
+
+  const handleMouseDown = (e) => {
+    // Only drag on the header, not on input fields, buttons, or textareas
+    if (
+      e.target.tagName === 'INPUT' || 
+      e.target.tagName === 'TEXTAREA' || 
+      e.target.tagName === 'BUTTON' || 
+      e.target.closest('button')
+    ) {
+      return;
+    }
+    setDragStart({
+      startX: e.clientX - modalPosition.x,
+      startY: e.clientY - modalPosition.y,
+    });
+  };
+
+  useEffect(() => {
+    const handleMouseMove = (e) => {
+      if (!dragStart) return;
+      const newX = e.clientX - dragStart.startX;
+      const newY = e.clientY - dragStart.startY;
+      
+      // Keep modal within viewport boundaries
+      const boundedX = Math.max(10, Math.min(window.innerWidth - 490, newX));
+      const boundedY = Math.max(10, Math.min(window.innerHeight - 460, newY));
+      
+      setModalPosition({ x: boundedX, y: boundedY });
+    };
+
+    const handleMouseUp = () => {
+      setDragStart(null);
+    };
+
+    if (dragStart) {
+      window.addEventListener('mousemove', handleMouseMove);
+      window.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [dragStart, modalPosition]);
+
   // Fetch available charts and annotations on mount
   useEffect(() => {
     fetchCharts();
@@ -320,12 +379,59 @@ export default function App() {
         </section>
       </main>
 
-      {/* Annotation Modal Popup */}
+      {/* Annotation Modal Popup (Modeless & Draggable) */}
       {modalOpen && selectedBrick && (
-        <div className="modal-overlay" onClick={() => setModalOpen(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-            <div className="modal-title">
-              {isEditing ? 'Modify Annotation' : 'Add Trade Annotation'}
+        <div className="modal-non-blocking-container" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, pointerEvents: 'none' }}>
+          <div 
+            className="modal-content" 
+            style={{ 
+              position: 'fixed', 
+              left: `${modalPosition.x}px`, 
+              top: `${modalPosition.y}px`, 
+              pointerEvents: 'auto',
+              margin: 0
+            }}
+          >
+            <div 
+              className="modal-header" 
+              onMouseDown={handleMouseDown} 
+              style={{ 
+                cursor: 'move', 
+                userSelect: 'none', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
+                borderBottom: '1px solid var(--border-color)', 
+                paddingBottom: '12px', 
+                marginBottom: '4px' 
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ color: 'var(--text-muted)', cursor: 'move', userSelect: 'none' }}>⋮⋮</span>
+                <span className="modal-title" style={{ margin: 0 }}>
+                  {isEditing ? 'Modify Annotation' : 'Add Trade Annotation'}
+                </span>
+              </div>
+              <button 
+                onClick={() => setModalOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  fontSize: '18px',
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  transition: 'all 0.2s',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+                onMouseOver={(e) => e.currentTarget.style.color = 'var(--color-sell)'}
+                onMouseOut={(e) => e.currentTarget.style.color = 'var(--text-muted)'}
+              >
+                ✕
+              </button>
             </div>
             
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
