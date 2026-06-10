@@ -76,7 +76,7 @@ class RenkoOverlayRenderer {
     this._primitive = primitive;
   }
 
-  draw(target) {
+  draw(target, priceConverter) {
     const chart = this._primitive._chart;
     const series = this._primitive._series;
     const data = this._primitive._data;
@@ -103,17 +103,30 @@ class RenkoOverlayRenderer {
 
       const width = scope.bitmapWidth;
 
+      let drawnCount = 0;
+      let nullCount = 0;
+
       for (let price = startPrice; price <= endPrice; price += brickSize) {
         const roundedPrice = Math.round(price * 100) / 100;
-        const yCoordinate = series.priceToCoordinate(roundedPrice);
-        if (yCoordinate === null) continue;
+        const yCoordinate = priceConverter(roundedPrice);
+        if (yCoordinate === null) {
+          nullCount++;
+          continue;
+        }
 
+        drawnCount++;
         const y = yCoordinate * verticalPixelRatio;
 
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
         ctx.stroke();
+      }
+
+      // Update debug div directly in DOM to trace execution
+      const debugDiv = document.getElementById('debug-grid');
+      if (debugDiv) {
+        debugDiv.innerText = `Grid Debug: min=${minPrice.toFixed(0)} max=${maxPrice.toFixed(0)} start=${startPrice} end=${endPrice} brick=${brickSize} drawn=${drawnCount} nulls=${nullCount}`;
       }
 
       // 2. Draw Bold 3px Wicks (on top of grid lines)
@@ -144,8 +157,8 @@ class RenkoOverlayRenderer {
           endPrice = highPrice;
         }
 
-        const startY = series.priceToCoordinate(startPrice);
-        const endY = series.priceToCoordinate(endPrice);
+        const startY = priceConverter(startPrice);
+        const endY = priceConverter(endPrice);
 
         if (startY === null || endY === null) return;
 
@@ -369,6 +382,9 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
   return (
     <div className="chart-wrapper">
       <div ref={chartContainerRef} style={{ width: '100%', height: '100%' }} />
+      <div id="debug-grid" style={{ position: 'absolute', bottom: 10, right: 10, background: 'rgba(0,0,0,0.8)', color: 'white', padding: '8px', borderRadius: '4px', fontSize: '11px', zIndex: 1000, pointerEvents: 'none', fontFamily: 'monospace' }}>
+        Debug: Loading...
+      </div>
     </div>
   );
 }
