@@ -53,28 +53,25 @@ class RenkoOverlayPrimitive {
   }
 
   paneViews() {
-    return [
-      new RenkoGridLinesPaneView(this), // Grid lines drawn behind
-      new ThickWicksPaneView(this),     // Wicks drawn on top
-    ];
+    return [new RenkoOverlayPaneView(this)];
   }
 }
 
-class RenkoGridLinesPaneView {
+class RenkoOverlayPaneView {
   constructor(primitive) {
     this._primitive = primitive;
   }
 
   zOrder() {
-    return 'bottom'; // Renders behind the candlestick bodies
+    return 'normal'; // Draw on the standard series layer to ensure visibility over background
   }
 
   renderer() {
-    return new RenkoGridLinesRenderer(this._primitive);
+    return new RenkoOverlayRenderer(this._primitive);
   }
 }
 
-class RenkoGridLinesRenderer {
+class RenkoOverlayRenderer {
   constructor(primitive) {
     this._primitive = primitive;
   }
@@ -96,14 +93,13 @@ class RenkoGridLinesRenderer {
       const horizontalPixelRatio = scope.horizontalPixelRatio;
       const verticalPixelRatio = scope.verticalPixelRatio;
 
-      // Pad range slightly beyond the data min/max
+      // 1. Draw Custom 15-Point Grid Lines
       const startPrice = Math.floor((minPrice - 150) / brickSize) * brickSize;
       const endPrice = Math.ceil((maxPrice + 150) / brickSize) * brickSize;
 
-      // Style grid lines to match theme
       ctx.lineWidth = (options.gridLineWidth || 1) * verticalPixelRatio;
-      ctx.strokeStyle = options.gridColor || 'rgba(0, 0, 0, 0.08)';
-      ctx.setLineDash([]); // Draw solid lines
+      ctx.strokeStyle = options.gridColor || 'rgba(0, 0, 0, 0.16)'; // Faint black lines for gray background
+      ctx.setLineDash([]); // Solid grid lines
 
       const width = scope.bitmapWidth;
 
@@ -119,44 +115,9 @@ class RenkoGridLinesRenderer {
         ctx.lineTo(width, y);
         ctx.stroke();
       }
-    });
-  }
-}
 
-class ThickWicksPaneView {
-  constructor(primitive) {
-    this._primitive = primitive;
-  }
-
-  zOrder() {
-    return 'top'; // Renders on top
-  }
-
-  renderer() {
-    return new ThickWicksRenderer(this._primitive);
-  }
-}
-
-class ThickWicksRenderer {
-  constructor(primitive) {
-    this._primitive = primitive;
-  }
-
-  draw(target) {
-    const chart = this._primitive._chart;
-    const series = this._primitive._series;
-    const data = this._primitive._data;
-    const options = this._primitive._options;
-
-    if (!chart || !series || !data || data.length === 0) return;
-
-    target.useBitmapCoordinateSpace((scope) => {
-      const ctx = scope.context;
-      const horizontalPixelRatio = scope.horizontalPixelRatio;
-      const verticalPixelRatio = scope.verticalPixelRatio;
-
-      // Configure wick style
-      ctx.lineWidth = (options.wickWidth || 3) * horizontalPixelRatio; // Default to 3px width
+      // 2. Draw Bold 3px Wicks (on top of grid lines)
+      ctx.lineWidth = (options.wickWidth || 3) * horizontalPixelRatio;
       ctx.strokeStyle = options.wickColor || '#000000';
       ctx.lineCap = 'butt';
 
@@ -304,7 +265,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       wickWidth: 3, // 3 pixels wide
       wickColor: '#000000',
       brickSize: 15.0, // Align custom grid lines with 15pt Renko
-      gridColor: 'rgba(0, 0, 0, 0.08)',
+      gridColor: 'rgba(0, 0, 0, 0.18)',
     });
     candlestickSeries.attachPrimitive(renkoOverlay);
 
