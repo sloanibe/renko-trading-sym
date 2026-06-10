@@ -1,0 +1,16 @@
+{
+  "mock_MNQ": [
+    {
+      "timestamp": "2026-06-09T08:35:00Z",
+      "action": "Buy",
+      "comment": "Nice rejection of EMA at 19038.0",
+      "metrics": {
+        "open": 19045.0,
+        "high": 19060.0,
+        "low": 19030.0,
+        "close": 19060.0,
+        "ema": 19038.0
+      }
+    }
+  ]
+}
