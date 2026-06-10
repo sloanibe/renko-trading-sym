@@ -9,7 +9,7 @@ class RenkoOverlayPrimitive {
     this._chart = null;
     this._series = null;
     this._requestUpdate = null;
-    
+
     this._minPrice = Infinity;
     this._maxPrice = -Infinity;
     this._calculatePriceRange();
@@ -76,7 +76,7 @@ class RenkoOverlayRenderer {
     this._primitive = primitive;
   }
 
-  draw(target, priceConverter) {
+  draw(target) {
     const chart = this._primitive._chart;
     const series = this._primitive._series;
     const data = this._primitive._data;
@@ -103,30 +103,17 @@ class RenkoOverlayRenderer {
 
       const width = scope.bitmapWidth;
 
-      let drawnCount = 0;
-      let nullCount = 0;
-
       for (let price = startPrice; price <= endPrice; price += brickSize) {
         const roundedPrice = Math.round(price * 100) / 100;
-        const yCoordinate = priceConverter(roundedPrice);
-        if (yCoordinate === null) {
-          nullCount++;
-          continue;
-        }
+        const yCoordinate = series.priceToCoordinate(roundedPrice);
+        if (yCoordinate === null) continue;
 
-        drawnCount++;
         const y = yCoordinate * verticalPixelRatio;
 
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
         ctx.stroke();
-      }
-
-      // Update debug div directly in DOM to trace execution
-      const debugDiv = document.getElementById('debug-grid');
-      if (debugDiv) {
-        debugDiv.innerText = `Grid Debug: min=${minPrice.toFixed(0)} max=${maxPrice.toFixed(0)} start=${startPrice} end=${endPrice} brick=${brickSize} drawn=${drawnCount} nulls=${nullCount}`;
       }
 
       // 2. Draw Bold 3px Wicks (on top of grid lines)
@@ -157,8 +144,8 @@ class RenkoOverlayRenderer {
           endPrice = highPrice;
         }
 
-        const startY = priceConverter(startPrice);
-        const endY = priceConverter(endPrice);
+        const startY = series.priceToCoordinate(startPrice);
+        const endY = series.priceToCoordinate(endPrice);
 
         if (startY === null || endY === null) return;
 
@@ -181,6 +168,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
   const chartRef = useRef(null);
   const candlestickSeriesRef = useRef(null);
   const emaSeriesRef = useRef(null);
+  const markersPluginRef = useRef(null);
 
   useEffect(() => {
     if (!chartContainerRef.current || !data || data.length === 0) return;
@@ -259,6 +247,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       lastTime = t;
       return {
         ...item,
+        originalTime: item.time, // Preserve original ISO string for annotation keys
         time: t,
       };
     });
@@ -319,6 +308,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
     return () => {
       window.removeEventListener('resize', handleResize);
       chart.remove();
+      markersPluginRef.current = null;
     };
   }, [data]);
 
@@ -376,15 +366,17 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       });
     }
 
-    createSeriesMarkers(candlestickSeriesRef.current, markers);
+    console.log("SYNCING MARKERS: annotations=", annotations, "generated markers=", markers);
+    if (!markersPluginRef.current) {
+      markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, markers);
+    } else {
+      markersPluginRef.current.setMarkers(markers);
+    }
   }, [annotations, data]);
 
   return (
     <div className="chart-wrapper">
       <div ref={chartContainerRef} style={{ width: '100%', height: '100%' }} />
-      <div id="debug-grid" style={{ position: 'absolute', bottom: 10, right: 10, background: 'rgba(0,0,0,0.8)', color: 'white', padding: '8px', borderRadius: '4px', fontSize: '11px', zIndex: 1000, pointerEvents: 'none', fontFamily: 'monospace' }}>
-        Debug: Loading...
-      </div>
     </div>
   );
 }

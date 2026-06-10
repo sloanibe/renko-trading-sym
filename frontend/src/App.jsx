@@ -123,10 +123,45 @@ export default function App() {
     }
   };
 
+  // Handle keyboard shortcuts when modal is open
+  useEffect(() => {
+    if (!modalOpen || !selectedBrick) return;
+
+    const handleKeyDown = (e) => {
+      // If user is typing in the textarea, only handle Enter (without Shift) to save
+      if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          handleSaveAnnotation();
+        }
+        return;
+      }
+
+      const key = e.key.toLowerCase();
+      if (key === 'b' || e.key === '1') {
+        setSelectedAction('Buy');
+      } else if (key === 's' || e.key === '2') {
+        setSelectedAction('Sell');
+      } else if (key === 'k' || e.key === '3') {
+        setSelectedAction('Skip');
+      } else if (e.key === 'Enter') {
+        handleSaveAnnotation();
+      } else if (e.key === 'Escape') {
+        setModalOpen(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [modalOpen, selectedAction, commentText, selectedBrick, activeChart]);
+
   const handleBrickClick = (brick) => {
     // Check if an annotation already exists for this brick's timestamp
     const activeAnnotations = allAnnotations[activeChart] || [];
-    const existing = activeAnnotations.find(a => a.timestamp === brick.time);
+    const targetTime = brick.originalTime || brick.time;
+    const existing = activeAnnotations.find(a => a.timestamp === targetTime || a.timestamp === brick.time);
     
     setSelectedBrick(brick);
     if (existing) {
@@ -134,7 +169,9 @@ export default function App() {
       setCommentText(existing.comment || '');
       setIsEditing(true);
     } else {
-      setSelectedAction('');
+      // Auto-prepopulate: Buy for Up bars (close > open), Sell for Down-bars (close < open)
+      const defaultAction = brick.close > brick.open ? 'Buy' : 'Sell';
+      setSelectedAction(defaultAction);
       setCommentText('');
       setIsEditing(false);
     }
@@ -148,8 +185,10 @@ export default function App() {
     }
 
     const activeAnnotations = [...(allAnnotations[activeChart] || [])];
+    const targetTime = selectedBrick.originalTime || selectedBrick.time;
+    
     const newAnnotation = {
-      timestamp: selectedBrick.time,
+      timestamp: targetTime,
       action: selectedAction,
       comment: commentText,
       metrics: {
@@ -161,7 +200,7 @@ export default function App() {
       }
     };
 
-    const index = activeAnnotations.findIndex(a => a.timestamp === selectedBrick.time);
+    const index = activeAnnotations.findIndex(a => a.timestamp === targetTime || a.timestamp === selectedBrick.time);
     if (index !== -1) {
       // Update existing
       activeAnnotations[index] = newAnnotation;
@@ -194,8 +233,9 @@ export default function App() {
   const handleDeleteAnnotation = async () => {
     if (!selectedBrick) return;
 
+    const targetTime = selectedBrick.originalTime || selectedBrick.time;
     const activeAnnotations = (allAnnotations[activeChart] || []).filter(
-      a => a.timestamp !== selectedBrick.time
+      a => a.timestamp !== targetTime && a.timestamp !== selectedBrick.time
     );
 
     // Optimistically update UI
@@ -215,7 +255,37 @@ export default function App() {
     }
   };
 
-  const currentAnnotations = allAnnotations[activeChart] || [];
+  const savedAnnotations = allAnnotations[activeChart] || [];
+
+  // Construct annotations to pass to ChartComponent, including a temporary preview if the modal is open
+  const currentAnnotations = React.useMemo(() => {
+    if (!modalOpen || !selectedBrick) {
+      return savedAnnotations;
+    }
+
+    const previewAnn = {
+      timestamp: selectedBrick.originalTime || selectedBrick.time,
+      action: selectedAction,
+      comment: commentText,
+      metrics: {
+        open: selectedBrick.open,
+        high: selectedBrick.high,
+        low: selectedBrick.low,
+        close: selectedBrick.close,
+        ema: selectedBrick.ema,
+      },
+      isPreview: true,
+    };
+
+    const targetTime = selectedBrick.originalTime || selectedBrick.time;
+    const exists = savedAnnotations.some(a => a.timestamp === targetTime);
+
+    if (exists) {
+      return savedAnnotations.map(a => a.timestamp === targetTime ? previewAnn : a);
+    } else {
+      return [...savedAnnotations, previewAnn];
+    }
+  }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, commentText]);
 
   return (
     <div className="app-container">
