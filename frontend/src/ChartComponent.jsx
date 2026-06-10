@@ -289,8 +289,11 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
 
       // Find the clicked Renko brick in our formatted dataset
       const clickedBrick = formattedData.find(d => d.time === param.time);
-      if (clickedBrick) {
-        onBrickClick(clickedBrick);
+      if (clickedBrick && chartContainerRef.current) {
+        const rect = chartContainerRef.current.getBoundingClientRect();
+        const viewportX = rect.left + param.point.x;
+        const viewportY = rect.top + param.point.y;
+        onBrickClick(clickedBrick, { x: viewportX, y: viewportY });
       }
     });
 

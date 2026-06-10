@@ -358,19 +358,19 @@ body {
 .modal-content {
   background: #171d2c;
   border: 1px solid var(--border-color);
-  border-radius: 16px;
-  width: 480px;
-  padding: 24px;
+  border-radius: 12px;
+  width: 320px;
+  padding: 12px;
   box-shadow: var(--shadow-main);
   animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
 }
 
 .modal-title {
   font-family: var(--font-display);
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text-main);
 }
@@ -378,18 +378,18 @@ body {
 .bar-stats-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
+  gap: 6px;
   background: var(--bg-main);
-  padding: 12px;
-  border-radius: 8px;
+  padding: 8px;
+  border-radius: 6px;
   border: 1px solid var(--border-color);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .stat-item {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
 
 .stat-label {
@@ -404,14 +404,15 @@ body {
 .action-buttons {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 6px;
 }
 
 .action-btn {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -419,7 +420,7 @@ body {
 }
 
 .action-btn:hover {
-  transform: translateY(-2px);
+  transform: translateY(-1px);
 }
 
 .action-btn.buy {
@@ -431,7 +432,7 @@ body {
 .action-btn.buy.selected {
   background: var(--color-buy);
   color: #0c0e12;
-  box-shadow: 0 0 12px var(--color-buy-glow);
+  box-shadow: 0 0 8px var(--color-buy-glow);
 }
 
 .action-btn.sell {
@@ -443,7 +444,7 @@ body {
 .action-btn.sell.selected {
   background: var(--color-sell);
   color: #fff;
-  box-shadow: 0 0 12px var(--color-sell-glow);
+  box-shadow: 0 0 8px var(--color-sell-glow);
 }
 
 .action-btn.skip {
@@ -455,42 +456,42 @@ body {
 .action-btn.skip.selected {
   background: var(--color-skip);
   color: #0c0e12;
-  box-shadow: 0 0 12px var(--color-skip-glow);
+  box-shadow: 0 0 8px var(--color-skip-glow);
 }
 
 .comment-input {
   width: 100%;
-  height: 80px;
+  height: 52px;
   background: var(--bg-main);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
-  padding: 10px;
+  border-radius: 6px;
+  padding: 8px;
   color: var(--text-main);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: 12px;
   resize: none;
   outline: none;
 }
 
 .comment-input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 8px rgba(0, 229, 255, 0.15);
+  box-shadow: 0 0 6px rgba(0, 229, 255, 0.15);
 }
 
 .modal-footer {
   display: flex;
   justify-content: flex-end;
-  gap: 12px;
+  gap: 8px;
 }
 
 .btn {
-  padding: 10px 16px;
-  border-radius: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   border: none;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .btn-secondary {

@@ -20,16 +20,7 @@ export default function App() {
   const [modalPosition, setModalPosition] = useState({ x: 100, y: 100 });
   const [dragStart, setDragStart] = useState(null);
 
-  // Center modal initially when it is opened
-  useEffect(() => {
-    if (modalOpen) {
-      const width = 480;
-      const height = 450;
-      const x = Math.max(20, (window.innerWidth - width) / 2);
-      const y = Math.max(20, (window.innerHeight - height) / 2);
-      setModalPosition({ x, y });
-    }
-  }, [modalOpen]);
+
 
   const handleMouseDown = (e) => {
     // Only drag on the header, not on input fields, buttons, or textareas
@@ -157,7 +148,7 @@ export default function App() {
     };
   }, [modalOpen, selectedAction, commentText, selectedBrick, activeChart]);
 
-  const handleBrickClick = (brick) => {
+  const handleBrickClick = (brick, clickPoint) => {
     // Check if an annotation already exists for this brick's timestamp
     const activeAnnotations = allAnnotations[activeChart] || [];
     const targetTime = brick.originalTime || brick.time;
@@ -175,6 +166,32 @@ export default function App() {
       setCommentText('');
       setIsEditing(false);
     }
+
+    if (clickPoint) {
+      const modalWidth = 320;
+      const modalHeight = 310;
+
+      // Determine if click point is in the right half of the viewport
+      const isRightHalf = clickPoint.x > window.innerWidth / 2;
+
+      // Place the modal either to the left or right of the bar (with 35px gap)
+      let x = isRightHalf ? (clickPoint.x - modalWidth - 35) : (clickPoint.x + 35);
+      x = Math.max(10, Math.min(window.innerWidth - modalWidth - 10, x));
+
+      // Center vertically around the clicked point
+      let y = clickPoint.y - (modalHeight / 2);
+      y = Math.max(10, Math.min(window.innerHeight - modalHeight - 10, y));
+
+      setModalPosition({ x, y });
+    } else {
+      // Fallback: center in screen
+      const width = 320;
+      const height = 310;
+      const x = Math.max(20, (window.innerWidth - width) / 2);
+      const y = Math.max(20, (window.innerHeight - height) / 2);
+      setModalPosition({ x, y });
+    }
+
     setModalOpen(true);
   };
 
