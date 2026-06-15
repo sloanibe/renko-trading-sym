@@ -13,9 +13,8 @@ DEFAULT_CONFIG = {
     "max_ema_distance": 60.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
     "tick_size": 0.25,               # MNQ minimum price increment
     "tail_break_ticks": 2,           # Failure after price exceeds the signal tail by this many ticks
-    "proximity_bar_limit": 5,        # Skip signals within this many bricks of a previous signal
-    "proximity_price_factor": 1.5,   # Skip if entry price is within this multiple of brick size from a previous signal
     "ema24_slope_threshold": 0.25,   # Minimum slope of the 24 EMA (points change)
+    "cooldown_bars": 0,             # Minimum number of bars to wait between signals (0 to disable)
 }
 
 def load_json_data(file_path):
@@ -71,6 +70,11 @@ def run_strategy(data, config):
         is_up_brick = c > o
         is_down_brick = c < o
         
+        # Check pure time cool-down first
+        cooldown = config.get("cooldown_bars", 10)
+        if len(signal_details) > 0 and (i - signal_details[-1]["barIndex"]) < cooldown:
+            continue
+            
         # Immediate previous bar to check wick extensions
         prev_bar = data[i - 1]
         prev_o = prev_bar["open"]
@@ -109,25 +113,13 @@ def run_strategy(data, config):
                     prev_3_above and
                     body_dist <= config["max_ema_distance"]):
                     
-                    # Proximity Box Filter (Clumped Trade Filter)
-                    is_clumped = False
-                    for prev_sig in reversed(signal_details):
-                        prev_idx = prev_sig["barIndex"]
-                        if i - prev_idx > config.get("proximity_bar_limit", 5):
-                            break
-                        prev_price = data[prev_idx]["close"]
-                        if abs(c - prev_price) <= config.get("proximity_price_factor", 1.5) * brick_size:
-                            is_clumped = True
-                            break
-                            
-                    if not is_clumped:
-                        signals[current["time"]] = "Buy"
-                        signal_by_index[i] = "Buy"
-                        signal_details.append({
-                            "barIndex": i,
-                            "timestamp": current["time"],
-                            "action": "Buy",
-                        })
+                    signals[current["time"]] = "Buy"
+                    signal_by_index[i] = "Buy"
+                    signal_details.append({
+                        "barIndex": i,
+                        "timestamp": current["time"],
+                        "action": "Buy",
+                    })
                     
         # 2. Check Bearish Setup (Short / Sell)
         # Trend Filter: 8 EMA sloping downwards, 24 EMA sloping downwards, and 8 EMA below 24 EMA
@@ -163,25 +155,13 @@ def run_strategy(data, config):
                     prev_3_below and
                     body_dist <= config["max_ema_distance"]):
                     
-                    # Proximity Box Filter (Clumped Trade Filter)
-                    is_clumped = False
-                    for prev_sig in reversed(signal_details):
-                        prev_idx = prev_sig["barIndex"]
-                        if i - prev_idx > config.get("proximity_bar_limit", 5):
-                            break
-                        prev_price = data[prev_idx]["close"]
-                        if abs(c - prev_price) <= config.get("proximity_price_factor", 1.5) * brick_size:
-                            is_clumped = True
-                            break
-                            
-                    if not is_clumped:
-                        signals[current["time"]] = "Sell"
-                        signal_by_index[i] = "Sell"
-                        signal_details.append({
-                            "barIndex": i,
-                            "timestamp": current["time"],
-                            "action": "Sell",
-                        })
+                    signals[current["time"]] = "Sell"
+                    signal_by_index[i] = "Sell"
+                    signal_details.append({
+                        "barIndex": i,
+                        "timestamp": current["time"],
+                        "action": "Sell",
+                    })
 
     # Evaluate every signal independently: one favorable brick must complete
     # before price exceeds the signal bar's tail by two ticks.
@@ -648,8 +628,7 @@ if __name__ == "__main__":
     parser.add_argument("--retest-tolerance", type=float, help="Override wick retest tolerance")
     parser.add_argument("--min-wick", type=float, help="Override minimum wick length")
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
-    parser.add_argument("--proximity-bar-limit", type=int, help="Override Proximity Box bar limit")
-    parser.add_argument("--proximity-price-factor", type=float, help="Override Proximity Box price factor")
+    parser.add_argument("--cooldown-bars", type=int, help="Override time cool-down in bars")
     parser.add_argument("--ema24-slope", type=float, help="Override 24 EMA slope threshold")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
@@ -666,10 +645,8 @@ if __name__ == "__main__":
         config["min_wick_length"] = args.min_wick
     if args.max_ema_dist is not None:
         config["max_ema_distance"] = args.max_ema_dist
-    if args.proximity_bar_limit is not None:
-        config["proximity_bar_limit"] = args.proximity_bar_limit
-    if args.proximity_price_factor is not None:
-        config["proximity_price_factor"] = args.proximity_price_factor
+    if args.cooldown_bars is not None:
+        config["cooldown_bars"] = args.cooldown_bars
     if args.ema24_slope is not None:
         config["ema24_slope_threshold"] = args.ema24_slope
 
