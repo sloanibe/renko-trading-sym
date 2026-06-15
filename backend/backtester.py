@@ -13,6 +13,8 @@ DEFAULT_CONFIG = {
     "max_ema_distance": 60.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
     "tick_size": 0.25,               # MNQ minimum price increment
     "tail_break_ticks": 2,           # Failure after price exceeds the signal tail by this many ticks
+    "proximity_bar_limit": 5,        # Skip signals within this many bricks of a previous signal
+    "proximity_price_factor": 1.5,   # Skip if entry price is within this multiple of brick size from a previous signal
 }
 
 def load_json_data(file_path):
@@ -91,13 +93,26 @@ def run_strategy(data, config):
                     l >= ema - config["max_ema_pierce"] and
                     prev_3_above and
                     body_dist <= config["max_ema_distance"]):
-                    signals[current["time"]] = "Buy"
-                    signal_by_index[i] = "Buy"
-                    signal_details.append({
-                        "barIndex": i,
-                        "timestamp": current["time"],
-                        "action": "Buy",
-                    })
+                    
+                    # Proximity Box Filter (Clumped Trade Filter)
+                    is_clumped = False
+                    for prev_sig in reversed(signal_details):
+                        prev_idx = prev_sig["barIndex"]
+                        if i - prev_idx > config.get("proximity_bar_limit", 5):
+                            break
+                        prev_price = data[prev_idx]["close"]
+                        if abs(c - prev_price) <= config.get("proximity_price_factor", 1.5) * brick_size:
+                            is_clumped = True
+                            break
+                            
+                    if not is_clumped:
+                        signals[current["time"]] = "Buy"
+                        signal_by_index[i] = "Buy"
+                        signal_details.append({
+                            "barIndex": i,
+                            "timestamp": current["time"],
+                            "action": "Buy",
+                        })
                     
         # 2. Check Bearish Setup (Short / Sell)
         # Trend Filter: EMA sloping downwards
@@ -130,13 +145,26 @@ def run_strategy(data, config):
                     h <= ema + config["max_ema_pierce"] and
                     prev_3_below and
                     body_dist <= config["max_ema_distance"]):
-                    signals[current["time"]] = "Sell"
-                    signal_by_index[i] = "Sell"
-                    signal_details.append({
-                        "barIndex": i,
-                        "timestamp": current["time"],
-                        "action": "Sell",
-                    })
+                    
+                    # Proximity Box Filter (Clumped Trade Filter)
+                    is_clumped = False
+                    for prev_sig in reversed(signal_details):
+                        prev_idx = prev_sig["barIndex"]
+                        if i - prev_idx > config.get("proximity_bar_limit", 5):
+                            break
+                        prev_price = data[prev_idx]["close"]
+                        if abs(c - prev_price) <= config.get("proximity_price_factor", 1.5) * brick_size:
+                            is_clumped = True
+                            break
+                            
+                    if not is_clumped:
+                        signals[current["time"]] = "Sell"
+                        signal_by_index[i] = "Sell"
+                        signal_details.append({
+                            "barIndex": i,
+                            "timestamp": current["time"],
+                            "action": "Sell",
+                        })
 
     # Evaluate every signal independently: one favorable brick must complete
     # before price exceeds the signal bar's tail by two ticks.
@@ -364,6 +392,8 @@ if __name__ == "__main__":
     parser.add_argument("--retest-tolerance", type=float, help="Override wick retest tolerance")
     parser.add_argument("--min-wick", type=float, help="Override minimum wick length")
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
+    parser.add_argument("--proximity-bar-limit", type=int, help="Override Proximity Box bar limit")
+    parser.add_argument("--proximity-price-factor", type=float, help="Override Proximity Box price factor")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     
@@ -379,6 +409,10 @@ if __name__ == "__main__":
         config["min_wick_length"] = args.min_wick
     if args.max_ema_dist is not None:
         config["max_ema_distance"] = args.max_ema_dist
+    if args.proximity_bar_limit is not None:
+        config["proximity_bar_limit"] = args.proximity_bar_limit
+    if args.proximity_price_factor is not None:
+        config["proximity_price_factor"] = args.proximity_price_factor
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")
