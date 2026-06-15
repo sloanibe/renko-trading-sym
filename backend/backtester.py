@@ -54,6 +54,10 @@ def run_strategy(data, config):
         is_up_brick = c > o
         is_down_brick = c < o
         
+        # Immediate previous bar to check wick extensions
+        prev_bar = data[i - 1]
+        prev_o = prev_bar["open"]
+        
         # 1. Check Bullish Setup (Long / Buy)
         # Trend Filter: EMA sloping upwards
         if ema_slope >= config["ema_slope_threshold"]:
@@ -73,6 +77,7 @@ def run_strategy(data, config):
                 not_too_deep = (ema - l) <= config["max_ema_pierce"]
                 
                 if (wick_length >= config["min_wick_length"] and
+                    l <= prev_o and
                     body_dist <= config["max_ema_distance"] and
                     ema_below_top and ema_above_bottom and not_too_deep):
                     signals[current["time"]] = "Buy"
@@ -96,6 +101,7 @@ def run_strategy(data, config):
                 not_too_deep = (h - ema) <= config["max_ema_pierce"]
                 
                 if (wick_length >= config["min_wick_length"] and
+                    h >= prev_o and
                     body_dist <= config["max_ema_distance"] and
                     ema_above_bottom and ema_below_top and not_too_deep):
                     signals[current["time"]] = "Sell"
