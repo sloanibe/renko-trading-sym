@@ -822,6 +822,12 @@ export default function ChartComponent({
               color = '#475569'; // Dark Slate Gray
               shape = 'circle';
               label = `🤝 BE #${ann.tradeIndex}`;
+            } else if (ann.exitResult === 'Trail') {
+              const profit = Number(ann.profitBricks) || 0;
+              const profitStr = profit >= 0 ? `+${profit.toFixed(1)}` : profit.toFixed(1);
+              color = profit >= 0 ? '#15803d' : '#b91c1c';
+              shape = 'square';
+              label = `🏃 TRAIL #${ann.tradeIndex} (${profitStr})`;
             } else if (ann.exitResult === 'EndSession') {
               color = '#475569';
               shape = 'circle';

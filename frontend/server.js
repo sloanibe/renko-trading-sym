@@ -146,6 +146,9 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.cooldownBars !== undefined) {
       cmd += ` --cooldown-bars ${parseInt(req.query.cooldownBars, 10)}`;
     }
+    if (req.query.exitStrategy) {
+      cmd += ` --exit-strategy ${req.query.exitStrategy}`;
+    }
     exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         console.error('Backtester error:', error, stderr);

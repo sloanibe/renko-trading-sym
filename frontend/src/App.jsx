@@ -40,6 +40,7 @@ export default function App() {
   const [retestTolerance, setRetestTolerance] = useState(2.0);
   const [ema24Slope, setEma24Slope] = useState(0.25);
   const [cooldownBars, setCooldownBars] = useState(0);
+  const [exitStrategy, setExitStrategy] = useState('trail'); // 'fixed' or 'trail' (Let Winners Run by default)
   const [hideUntakenSignals, setHideUntakenSignals] = useState(true);
   const [optimizing, setOptimizing] = useState(false);
 
@@ -54,9 +55,10 @@ export default function App() {
     const tol = configOverrides.retestTolerance !== undefined ? configOverrides.retestTolerance : retestTolerance;
     const ema24Val = configOverrides.ema24Slope !== undefined ? configOverrides.ema24Slope : ema24Slope;
     const cooldownVal = configOverrides.cooldownBars !== undefined ? configOverrides.cooldownBars : cooldownBars;
+    const exitStrategyVal = configOverrides.exitStrategy !== undefined ? configOverrides.exitStrategy : exitStrategy;
 
     try {
-      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}&ema24Slope=${ema24Val}&cooldownBars=${cooldownVal}`;
+      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}&ema24Slope=${ema24Val}&cooldownBars=${cooldownVal}&exitStrategy=${exitStrategyVal}`;
       const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
       const data = await res.json();
       setBacktestResults(data);
@@ -175,7 +177,7 @@ export default function App() {
       setBacktestResults(null);
       setBookmark(null);
     }
-  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance, ema24Slope, cooldownBars]);
+  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance, ema24Slope, cooldownBars, exitStrategy]);
 
   const fetchCharts = async () => {
     try {
@@ -548,6 +550,7 @@ export default function App() {
               direction: trade.direction,
               isCampaignExit: true,
               exitResult: trade.result,
+              profitBricks: trade.profit_bricks,
               tradeIndex: idx + 1,
               comment: `Campaign trade exit #${idx+1} (${trade.result})`,
             });
@@ -787,6 +790,35 @@ export default function App() {
                   />
                 </div>
 
+                {/* Exit Strategy Selector */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Exit Strategy Permutation:</span>
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '2px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'trail' ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                      <input 
+                        type="radio" 
+                        name="exitStrategy" 
+                        value="trail" 
+                        checked={exitStrategy === 'trail'} 
+                        onChange={() => setExitStrategy('trail')} 
+                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                      />
+                      Winners Run
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed' ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                      <input 
+                        type="radio" 
+                        name="exitStrategy" 
+                        value="fixed" 
+                        checked={exitStrategy === 'fixed'} 
+                        onChange={() => setExitStrategy('fixed')} 
+                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                      />
+                      Fixed Target
+                    </label>
+                  </div>
+                </div>
+
                 {/* Hide Untaken Signals Checkbox */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
                   <input 
@@ -880,6 +912,12 @@ export default function App() {
                     <span>🎯</span> Session Campaign (Opt. B)
                   </h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Exit Strategy:</span>
+                      <span style={{ fontWeight: '600', textTransform: 'capitalize', color: 'var(--primary)' }}>
+                        {backtestResults?.campaign_results?.exit_strategy === 'trail' ? 'Winners Run' : 'Fixed Target'}
+                      </span>
+                    </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Trading Days:</span>
                       <span style={{ fontWeight: '600' }}>{stats.campaignTotalDays} days</span>
