@@ -169,6 +169,115 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
   const candlestickSeriesRef = useRef(null);
   const emaSeriesRef = useRef(null);
   const markersPluginRef = useRef(null);
+  const sliderRef = useRef(null);
+
+  // Button & Slider Handlers
+  const handleSliderInput = (e) => {
+    const chart = chartRef.current;
+    if (!chart || !data) return;
+    
+    const start = parseFloat(e.target.value);
+    const logicalRange = chart.timeScale().getVisibleLogicalRange();
+    if (logicalRange) {
+      const width = logicalRange.to - logicalRange.from;
+      chart.timeScale().setVisibleLogicalRange({
+        from: start,
+        to: start + width,
+      });
+    }
+  };
+
+  const handleGoToStart = () => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const logicalRange = chart.timeScale().getVisibleLogicalRange();
+    if (logicalRange) {
+      const width = logicalRange.to - logicalRange.from;
+      chart.timeScale().setVisibleLogicalRange({
+        from: 0,
+        to: width,
+      });
+    }
+  };
+
+  const handleGoToEnd = () => {
+    const chart = chartRef.current;
+    if (!chart || !data) return;
+    const logicalRange = chart.timeScale().getVisibleLogicalRange();
+    if (logicalRange) {
+      const width = logicalRange.to - logicalRange.from;
+      chart.timeScale().setVisibleLogicalRange({
+        from: data.length - width,
+        to: data.length,
+      });
+    }
+  };
+
+  const handleScrollLeft = () => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const logicalRange = chart.timeScale().getVisibleLogicalRange();
+    if (logicalRange) {
+      const width = logicalRange.to - logicalRange.from;
+      const shift = width * 0.2;
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.max(0, logicalRange.from - shift),
+        to: Math.max(width, logicalRange.to - shift),
+      });
+    }
+  };
+
+  const handleScrollRight = () => {
+    const chart = chartRef.current;
+    if (!chart || !data) return;
+    const logicalRange = chart.timeScale().getVisibleLogicalRange();
+    if (logicalRange) {
+      const width = logicalRange.to - logicalRange.from;
+      const shift = width * 0.2;
+      const maxFrom = data.length - width;
+      chart.timeScale().setVisibleLogicalRange({
+        from: Math.min(maxFrom, logicalRange.from + shift),
+        to: Math.min(data.length, logicalRange.to + shift),
+      });
+    }
+  };
+
+  const handleFitChart = () => {
+    const chart = chartRef.current;
+    if (chart) {
+      chart.timeScale().fitContent();
+    }
+  };
+
+  const handleZoomIn = () => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    const logicalRange = chart.timeScale().getVisibleLogicalRange();
+    if (logicalRange) {
+      const width = logicalRange.to - logicalRange.from;
+      const center = (logicalRange.from + logicalRange.to) / 2;
+      const newWidth = Math.max(10, width * 0.7); // Zoom in by 30%
+      chart.timeScale().setVisibleLogicalRange({
+        from: center - newWidth / 2,
+        to: center + newWidth / 2,
+      });
+    }
+  };
+
+  const handleZoomOut = () => {
+    const chart = chartRef.current;
+    if (!chart || !data) return;
+    const logicalRange = chart.timeScale().getVisibleLogicalRange();
+    if (logicalRange) {
+      const width = logicalRange.to - logicalRange.from;
+      const center = (logicalRange.from + logicalRange.to) / 2;
+      const newWidth = Math.min(data.length, width * 1.4); // Zoom out by 40%
+      chart.timeScale().setVisibleLogicalRange({
+        from: center - newWidth / 2,
+        to: center + newWidth / 2,
+      });
+    }
+  };
 
   useEffect(() => {
     if (!chartContainerRef.current || !data || data.length === 0) return;
@@ -210,6 +319,38 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
         timeVisible: true,
         secondsVisible: true,
         barSpacing: 18, // Zoom in by default to make wicks and bars visually thicker
+        tickMarkFormatter: (time, tickMarkType, locale) => {
+          const date = new Date(time * 1000);
+          const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+          switch (tickMarkType) {
+            case 0: // Year
+              return String(date.getUTCFullYear());
+            case 1: // Month
+              return MONTHS[date.getUTCMonth()];
+            case 2: // DayOfMonth
+              return String(date.getUTCDate());
+            case 3: // Time
+            case 4: // TimeWithSeconds
+              const hours = String(date.getUTCHours()).padStart(2, '0');
+              const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+              return `${hours}:${minutes}`;
+            default:
+              return '';
+          }
+        },
+      },
+      localization: {
+        locale: 'en-US',
+        timeFormatter: (timestamp) => {
+          const date = new Date(timestamp * 1000);
+          const year = date.getUTCFullYear();
+          const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+          const day = String(date.getUTCDate()).padStart(2, '0');
+          const hours = String(date.getUTCHours()).padStart(2, '0');
+          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+          const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+          return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+        },
       },
     });
 
@@ -237,7 +378,8 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
     // Format Data & ensure strict ascending timestamps (TradingView requirement)
     let lastTime = 0;
     const formattedData = data.map(item => {
-      let t = Math.floor(Date.parse(item.time) / 1000);
+      // Append 'Z' to treat the date as UTC and prevent timezone offsets on display
+      let t = Math.floor(Date.parse(item.time + 'Z') / 1000);
       if (isNaN(t)) {
         t = lastTime + 1;
       }
@@ -280,20 +422,52 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       }));
     emaSeries.setData(emaData);
 
-    // Fit content inside visible range initially
-    chart.timeScale().fitContent();
+    // Set initial visible range (show last 150 bars to be zoomed in and readable)
+    const totalBars = formattedData.length;
+    const defaultVisibleBars = 150;
+    if (totalBars > defaultVisibleBars) {
+      chart.timeScale().setVisibleLogicalRange({
+        from: totalBars - defaultVisibleBars,
+        to: totalBars,
+      });
+    } else {
+      chart.timeScale().fitContent();
+    }
 
-    // Handle Clicks for Annotation Placement
+    // Sync slider with chart scroll
+    const handleVisibleRangeChange = (logicalRange) => {
+      if (!logicalRange) return;
+      const from = logicalRange.from;
+      const to = logicalRange.to;
+      const width = to - from;
+      if (sliderRef.current) {
+        const maxVal = Math.max(0, formattedData.length - width);
+        sliderRef.current.max = maxVal;
+        sliderRef.current.value = Math.min(maxVal, Math.max(0, from));
+      }
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+
+    // Handle Clicks for Annotation Placement (only on the actual bar)
     chart.subscribeClick((param) => {
       if (!param || !param.time || !param.point) return;
 
       // Find the clicked Renko brick in our formatted dataset
       const clickedBrick = formattedData.find(d => d.time === param.time);
       if (clickedBrick && chartContainerRef.current) {
-        const rect = chartContainerRef.current.getBoundingClientRect();
-        const viewportX = rect.left + param.point.x;
-        const viewportY = rect.top + param.point.y;
-        onBrickClick(clickedBrick, { x: viewportX, y: viewportY });
+        const yClick = param.point.y;
+        const yHigh = candlestickSeries.priceToCoordinate(clickedBrick.high);
+        const yLow = candlestickSeries.priceToCoordinate(clickedBrick.low);
+
+        if (yHigh !== null && yLow !== null) {
+          const padding = 8; // 8px tolerance padding for easier clicking
+          if (yClick >= yHigh - padding && yClick <= yLow + padding) {
+            const rect = chartContainerRef.current.getBoundingClientRect();
+            const viewportX = rect.left + param.point.x;
+            const viewportY = rect.top + param.point.y;
+            onBrickClick(clickedBrick, { x: viewportX, y: viewportY });
+          }
+        }
       }
     });
 
@@ -323,7 +497,8 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
     let lastTime = 0;
     const timeMapping = {}; // ISO String -> Unix Timestamp
     data.forEach(item => {
-      let t = Math.floor(Date.parse(item.time) / 1000);
+      // Append 'Z' to treat the date as UTC and match the price series timestamps
+      let t = Math.floor(Date.parse(item.time + 'Z') / 1000);
       if (isNaN(t)) {
         t = lastTime + 1;
       }
@@ -344,17 +519,17 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
             markers.push({
               time: chartTime,
               position: 'belowBar',
-              color: '#00e676', // Emerald Green
+              color: ann.isSystem ? '#1b5e20' : '#00e676', // Deep forest green for system, emerald for user
               shape: 'arrowUp',
-              text: 'BUY',
+              text: ann.isSystem ? 'SYS BUY' : 'BUY',
             });
           } else if (ann.action === 'Sell') {
             markers.push({
               time: chartTime,
               position: 'aboveBar',
-              color: '#ff1744', // Ruby Red
+              color: ann.isSystem ? '#b71c1c' : '#ff1744', // Deep red for system, ruby for user
               shape: 'arrowDown',
-              text: 'SELL',
+              text: ann.isSystem ? 'SYS SELL' : 'SELL',
             });
           } else if (ann.action === 'Skip') {
             markers.push({
@@ -378,8 +553,32 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
   }, [annotations, data]);
 
   return (
-    <div className="chart-wrapper">
-      <div ref={chartContainerRef} style={{ width: '100%', height: '100%' }} />
+    <div className="chart-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div ref={chartContainerRef} style={{ flex: 1, minHeight: 0 }} />
+      <div className="chart-controls">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '40px' }}>Start</span>
+          <input
+            ref={sliderRef}
+            type="range"
+            min="0"
+            max={data ? Math.max(0, data.length - 150) : 100}
+            defaultValue="0"
+            onInput={handleSliderInput}
+            className="timeline-slider"
+          />
+          <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '40px', textAlign: 'right' }}>End</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button onClick={handleGoToStart} className="control-btn" title="Go to Beginning">⏮ Go to Start</button>
+          <button onClick={handleScrollLeft} className="control-btn" title="Scroll Left">◀ Scroll Left</button>
+          <button onClick={handleZoomOut} className="control-btn" title="Zoom Out">➖ Zoom Out</button>
+          <button onClick={handleFitChart} className="control-btn" title="Show All Data">🔍 Fit All</button>
+          <button onClick={handleZoomIn} className="control-btn" title="Zoom In">➕ Zoom In</button>
+          <button onClick={handleScrollRight} className="control-btn" title="Scroll Right">Scroll Right ▶</button>
+          <button onClick={handleGoToEnd} className="control-btn" title="Go to Latest">Go to End ⏭</button>
+        </div>
+      </div>
     </div>
   );
 }

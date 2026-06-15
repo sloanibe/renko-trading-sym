@@ -9,6 +9,75 @@ export default function App() {
   const [chartData, setChartData] = useState([]);
   const [allAnnotations, setAllAnnotations] = useState({});
   const [selectedBrick, setSelectedBrick] = useState(null);
+  const [backtestResults, setBacktestResults] = useState(null);
+  const [loadingBacktest, setLoadingBacktest] = useState(false);
+
+  // Strategy Configuration states
+  const [slopeThreshold, setSlopeThreshold] = useState(2.0);
+  const [minWick, setMinWick] = useState(5.0);
+  const [maxEmaDist, setMaxEmaDist] = useState(20.0);
+  const [retestTolerance, setRetestTolerance] = useState(2.0);
+  const [targetPoints, setTargetPoints] = useState(45.0);
+  const [stopLossPoints, setStopLossPoints] = useState(15.0);
+  const [optimizing, setOptimizing] = useState(false);
+
+  const fetchBacktest = async (chartName, configOverrides = {}) => {
+    if (!chartName) return;
+    setLoadingBacktest(true);
+    
+    // Prioritize overrides (passed during optimization/updates) over stale states
+    const slope = configOverrides.slopeThreshold !== undefined ? configOverrides.slopeThreshold : slopeThreshold;
+    const wick = configOverrides.minWick !== undefined ? configOverrides.minWick : minWick;
+    const dist = configOverrides.maxEmaDist !== undefined ? configOverrides.maxEmaDist : maxEmaDist;
+    const tol = configOverrides.retestTolerance !== undefined ? configOverrides.retestTolerance : retestTolerance;
+    const tgt = configOverrides.targetPoints !== undefined ? configOverrides.targetPoints : targetPoints;
+    const sl = configOverrides.stopLossPoints !== undefined ? configOverrides.stopLossPoints : stopLossPoints;
+
+    try {
+      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}&target=${tgt}&stop=${sl}`;
+      const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
+      const data = await res.json();
+      setBacktestResults(data);
+    } catch (err) {
+      console.error('Failed to fetch backtest results:', err);
+    } finally {
+      setLoadingBacktest(false);
+    }
+  };
+
+  const handleOptimize = async () => {
+    if (!activeChart) return;
+    setOptimizing(true);
+    try {
+      const res = await fetch(`${API_BASE}/charts/${activeChart}/optimize`);
+      const bestConfig = await res.json();
+      if (bestConfig && !bestConfig.error) {
+        setSlopeThreshold(bestConfig.ema_slope_threshold);
+        setMinWick(bestConfig.min_wick_length);
+        setMaxEmaDist(bestConfig.max_ema_distance);
+        setRetestTolerance(bestConfig.wick_retest_tolerance);
+        setTargetPoints(bestConfig.target_points);
+        setStopLossPoints(bestConfig.stop_loss_points);
+        
+        // Fetch backtest with the optimized config overrides immediately
+        fetchBacktest(activeChart, {
+          slopeThreshold: bestConfig.ema_slope_threshold,
+          minWick: bestConfig.min_wick_length,
+          maxEmaDist: bestConfig.max_ema_distance,
+          retestTolerance: bestConfig.wick_retest_tolerance,
+          targetPoints: bestConfig.target_points,
+          stopLossPoints: bestConfig.stop_loss_points
+        });
+      } else {
+        alert('Optimization failed: ' + (bestConfig.error || 'Unknown error'));
+      }
+    } catch (err) {
+      console.error('Failed to optimize parameters:', err);
+      alert('Failed to connect to the optimization engine.');
+    } finally {
+      setOptimizing(false);
+    }
+  };
   
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
@@ -72,14 +141,16 @@ export default function App() {
     fetchAnnotations();
   }, []);
 
-  // Fetch chart data when active selection changes
+  // Fetch chart data and backtest when active selection changes or when configuration is adjusted
   useEffect(() => {
     if (activeChart) {
       fetchChartData(activeChart);
+      fetchBacktest(activeChart);
     } else {
       setChartData([]);
+      setBacktestResults(null);
     }
-  }, [activeChart]);
+  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance, targetPoints, stopLossPoints]);
 
   const fetchCharts = async () => {
     try {
@@ -160,10 +231,17 @@ export default function App() {
       setCommentText(existing.comment || '');
       setIsEditing(true);
     } else {
-      // Auto-prepopulate: Buy for Up bars (close > open), Sell for Down-bars (close < open)
-      const defaultAction = brick.close > brick.open ? 'Buy' : 'Sell';
-      setSelectedAction(defaultAction);
-      setCommentText('');
+      // Check if there is a system signal for this brick
+      const sysSignal = backtestResults?.signals?.[targetTime] || backtestResults?.signals?.[brick.time];
+      if (sysSignal) {
+        setSelectedAction(sysSignal);
+        setCommentText('Approving system signal');
+      } else {
+        // Auto-prepopulate: Buy for Up bars (close > open), Sell for Down-bars (close < open)
+        const defaultAction = brick.close > brick.open ? 'Buy' : 'Sell';
+        setSelectedAction(defaultAction);
+        setCommentText('');
+      }
       setIsEditing(false);
     }
 
@@ -241,6 +319,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileKey: activeChart, annotations: activeAnnotations }),
       });
+      // Re-run backtester after annotations are updated on disk
+      fetchBacktest(activeChart);
     } catch (err) {
       console.error('Failed to save annotation:', err);
       alert('Failed to persist annotation to disk');
@@ -266,6 +346,8 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileKey: activeChart, annotations: activeAnnotations }),
       });
+      // Re-run backtester after annotations are updated on disk
+      fetchBacktest(activeChart);
     } catch (err) {
       console.error('Failed to delete annotation:', err);
       alert('Failed to delete annotation on disk');
@@ -303,6 +385,57 @@ export default function App() {
       return [...savedAnnotations, previewAnn];
     }
   }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, commentText]);
+
+  // Merge system signals with user annotations for chart display
+  const mergedAnnotations = React.useMemo(() => {
+    const merged = [...currentAnnotations];
+    if (backtestResults && backtestResults.signals) {
+      Object.entries(backtestResults.signals).forEach(([timestamp, action]) => {
+        const hasUserAnn = currentAnnotations.some(a => a.timestamp === timestamp);
+        if (!hasUserAnn) {
+          merged.push({
+            timestamp,
+            action,
+            isSystem: true,
+            comment: 'System generated entry',
+          });
+        }
+      });
+    }
+    return merged;
+  }, [currentAnnotations, backtestResults]);
+
+  // Compute performance and alignment stats
+  const stats = React.useMemo(() => {
+    if (!backtestResults || !backtestResults.trades) return null;
+    
+    const trades = backtestResults.trades;
+    const wins = trades.filter(t => t.result === 'Win').length;
+    const losses = trades.filter(t => t.result === 'Loss').length;
+    const totalTrades = trades.length;
+    const winRate = totalTrades > 0 ? (wins / totalTrades * 100).toFixed(1) : '0.0';
+    const totalPnL = trades.reduce((sum, t) => sum + (t.pnl_points || 0), 0).toFixed(1);
+    
+    const alignment = backtestResults.alignment || {};
+    const matches = alignment.matches_count || 0;
+    const missed = alignment.false_negatives_count || 0;
+    const overTriggers = alignment.false_positives_count || 0;
+    const totalLabeled = matches + missed;
+    const alignmentRate = totalLabeled > 0 ? (matches / totalLabeled * 100).toFixed(1) : '0.0';
+    
+    return {
+      totalTrades,
+      wins,
+      losses,
+      winRate,
+      totalPnL,
+      matches,
+      missed,
+      overTriggers,
+      alignmentRate,
+      totalLabeled
+    };
+  }, [backtestResults]);
 
   return (
     <div className="app-container">
@@ -358,20 +491,208 @@ export default function App() {
           </p>
         </div>
 
-        {/* Details card */}
+        {/* Strategy & Alignment Card */}
         {chartData.length > 0 && (
-          <div style={{ background: 'var(--bg-card)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-            <h4 style={{ color: 'var(--primary)', marginBottom: '8px', fontSize: '13px', fontWeight: '600' }}>Active Dataset Stats</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Total Bricks:</span>
-                <span style={{ fontWeight: '600' }}>{chartData.length}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--text-secondary)' }}>Annotations:</span>
-                <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{currentAnnotations.length}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {/* Strategy Configuration Card */}
+            <div style={{ background: 'var(--bg-card)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+              <h4 style={{ color: 'var(--primary)', marginBottom: '10px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span>⚙️</span> Strategy Config</span>
+                <button 
+                  onClick={handleOptimize} 
+                  disabled={optimizing}
+                  style={{
+                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '6px',
+                    padding: '4px 8px',
+                    fontSize: '10px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 4px rgba(59, 130, 246, 0.2)',
+                    transition: 'all 0.2s',
+                    opacity: optimizing ? 0.7 : 1
+                  }}
+                  onMouseOver={(e) => e.currentTarget.style.filter = 'brightness(1.1)'}
+                  onMouseOut={(e) => e.currentTarget.style.filter = 'brightness(1.0)'}
+                >
+                  {optimizing ? 'Optimizing...' : 'Auto-Optimize ⚡'}
+                </button>
+              </h4>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Min Wick Length */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Min Wick Length:</span>
+                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{minWick.toFixed(1)} pt</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="40" 
+                    step="0.5" 
+                    value={minWick} 
+                    onChange={(e) => setMinWick(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
+                  />
+                </div>
+
+                {/* Max EMA Distance */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Max EMA Distance:</span>
+                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{maxEmaDist.toFixed(1)} pt</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="5" 
+                    max="100" 
+                    step="1" 
+                    value={maxEmaDist} 
+                    onChange={(e) => setMaxEmaDist(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
+                  />
+                </div>
+
+                {/* EMA Slope Threshold */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>EMA Slope Threshold:</span>
+                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{slopeThreshold.toFixed(1)} pt</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0.5" 
+                    max="50" 
+                    step="0.5" 
+                    value={slopeThreshold} 
+                    onChange={(e) => setSlopeThreshold(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
+                  />
+                </div>
+
+                {/* Wick Retest Tolerance */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Retest Tolerance:</span>
+                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{retestTolerance.toFixed(1)} pt</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0.5" 
+                    max="30" 
+                    step="0.5" 
+                    value={retestTolerance} 
+                    onChange={(e) => setRetestTolerance(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
+                  />
+                </div>
+
+                {/* Take Profit / Stop Loss (in two columns) */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
+                  <div>
+                    <span style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Profit Target (pt):</span>
+                    <input 
+                      type="number" 
+                      min="5" 
+                      max="200" 
+                      value={targetPoints} 
+                      onChange={(e) => setTargetPoints(parseFloat(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '4px 6px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '11px' }}
+                    />
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Stop Loss (pt):</span>
+                    <input 
+                      type="number" 
+                      min="2" 
+                      max="100" 
+                      value={stopLossPoints} 
+                      onChange={(e) => setStopLossPoints(parseFloat(e.target.value) || 0)}
+                      style={{ width: '100%', padding: '4px 6px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '11px' }}
+                    />
+                  </div>
+                </div>
               </div>
             </div>
+
+            {/* Active Dataset Stats */}
+            <div style={{ background: 'var(--bg-card)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+              <h4 style={{ color: 'var(--primary)', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>📊</span> Dataset Stats
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>Total Bricks:</span>
+                  <span style={{ fontWeight: '600' }}>{chartData.length}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span style={{ color: 'var(--text-secondary)' }}>User Annotations:</span>
+                  <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{savedAnnotations.length}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Backtest & Alignment Stats */}
+            {loadingBacktest ? (
+              <div style={{ background: 'var(--bg-card)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                Running backtester engine...
+              </div>
+            ) : stats ? (
+              <div style={{ background: 'var(--bg-card)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div>
+                  <h4 style={{ color: '#10b981', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>⚙️</span> Strategy Performance
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Total Trades:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.totalTrades}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Win / Loss:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.wins}W - {stats.losses}L</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Win Rate:</span>
+                      <span style={{ fontWeight: '600', color: parseFloat(stats.winRate) >= 50 ? '#10b981' : '#ef4444' }}>{stats.winRate}%</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Total PnL:</span>
+                      <span style={{ fontWeight: '600', color: parseFloat(stats.totalPnL) >= 0 ? '#10b981' : '#ef4444' }}>
+                        {parseFloat(stats.totalPnL) >= 0 ? '+' : ''}{stats.totalPnL} pts
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+                  <h4 style={{ color: '#3b82f6', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>👁️</span> Eye vs. Algorithm
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Match Rate:</span>
+                      <span style={{ fontWeight: '600', color: '#3b82f6' }}>{stats.alignmentRate}% ({stats.matches}/{stats.totalLabeled})</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Missed (FN):</span>
+                      <span style={{ fontWeight: '600', color: stats.missed > 0 ? '#ff9100' : 'var(--text-secondary)' }}>{stats.missed}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Over-Triggers (FP):</span>
+                      <span style={{ fontWeight: '600', color: stats.overTriggers > 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.overTriggers}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ background: 'var(--bg-card)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                No backtest results available.
+              </div>
+            )}
           </div>
         )}
       </aside>
@@ -389,7 +710,7 @@ export default function App() {
               </div>
               <ChartComponent
                 data={chartData}
-                annotations={currentAnnotations}
+                annotations={mergedAnnotations}
                 onBrickClick={handleBrickClick}
               />
             </>

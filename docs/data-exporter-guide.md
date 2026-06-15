@@ -10,10 +10,10 @@ The C# exporter is implemented as an Indicator Study in MultiCharts.NET ([RenkoD
 
 When applied to a chart, it executes the following logic:
 1.  **Warm-up & Initialization**: Triggers `StartCalc()` to clear any previous bars from memory.
-2.  **Bar Iteration**: MultiCharts passes each completed Renko bar (including wicks) on the chart through the `OnBarUpdate()` method sequentially.
+2.  **Bar Iteration**: MultiCharts passes each completed Renko bar (including wicks) on the chart through the `CalcBar()` method sequentially.
 3.  **EMA Calculation**: For each bar, it calculates the Exponential Moving Average (EMA) of the Close prices based on your input length (default: `8`).
 4.  **JSON Formatting**: It formats each bar's parameters (Timestamp, Open, High, Low, Close, EMA) into a JSON object string. It uses `CultureInfo.InvariantCulture` to guarantee that decimal numbers use a dot (`.`) separator instead of a comma (`,`), ensuring universal JSON validity.
-5.  **Single-Write Execution**: Once the indicator reaches the **very last bar** on the chart (`Bars.CurrentBar == Bars.Count`), it concatenates the accumulated bar objects into a JSON array and writes it to your Windows filesystem at `C:\MultiChartsExports\[FileName].json`.
+5.  **Single-Write Execution**: Once the indicator reaches the **very last bar** on the chart (`Bars.LastBarOnChart`), it concatenates the accumulated bar objects into a JSON array and writes it to your Windows filesystem at `C:\MultiChartsExports\[FileName].json`.
 
 ---
 

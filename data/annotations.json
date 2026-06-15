@@ -5,11 +5,121 @@
       "action": "Buy",
       "comment": "Nice rejection of EMA at 19038.0",
       "metrics": {
-        "open": 19045.0,
-        "high": 19060.0,
-        "low": 19030.0,
-        "close": 19060.0,
-        "ema": 19038.0
+        "open": 19045,
+        "high": 19060,
+        "low": 19030,
+        "close": 19060,
+        "ema": 19038
+      }
+    }
+  ],
+  "MNQ_Realistic_Market": [
+    {
+      "timestamp": "2026-06-09T13:52:32Z",
+      "action": "Sell",
+      "comment": "you missed this sell signal",
+      "metrics": {
+        "open": 18120,
+        "high": 18148.65,
+        "low": 18105,
+        "close": 18105,
+        "ema": 18148.1753
+      }
+    },
+    {
+      "timestamp": "2026-06-09T13:54:56Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 18075,
+        "high": 18100.97,
+        "low": 18060,
+        "close": 18060,
+        "ema": 18108.1126
+      }
+    },
+    {
+      "timestamp": "2026-06-09T14:18:00Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 17880,
+        "high": 17898.94,
+        "low": 17865,
+        "close": 17865,
+        "ema": 17909.5676
+      }
+    },
+    {
+      "timestamp": "2026-06-09T14:24:22Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 17835,
+        "high": 17864.97,
+        "low": 17820,
+        "close": 17820,
+        "ema": 17860.8321
+      }
+    },
+    {
+      "timestamp": "2026-06-09T14:32:53Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 17715,
+        "high": 17730.11,
+        "low": 17700,
+        "close": 17700,
+        "ema": 17750.9374
+      }
+    },
+    {
+      "timestamp": "2026-06-09T14:34:16Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 17700,
+        "high": 17721.74,
+        "low": 17685,
+        "close": 17685,
+        "ema": 17736.2847
+      }
+    },
+    {
+      "timestamp": "2026-06-09T14:37:18Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 17670,
+        "high": 17693.81,
+        "low": 17655,
+        "close": 17655,
+        "ema": 17706.7648
+      }
+    },
+    {
+      "timestamp": "2026-06-09T14:39:05Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 17655,
+        "high": 17676.06,
+        "low": 17640,
+        "close": 17640,
+        "ema": 17691.9282
+      }
+    },
+    {
+      "timestamp": "2026-06-09T14:44:39Z",
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 17595,
+        "high": 17619.17,
+        "low": 17580,
+        "close": 17580,
+        "ema": 17632.2907
       }
     }
   ]

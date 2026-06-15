@@ -3,6 +3,7 @@ import cors from 'cors';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { exec } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -86,6 +87,77 @@ app.post('/api/annotations', (req, res) => {
     res.json({ success: true, message: `Annotations saved for ${fileKey}` });
   } catch (error) {
     res.status(500).json({ error: 'Failed to save annotations', details: error.message });
+  }
+});
+
+// Endpoint: Get backtester results
+app.get('/api/charts/:name/backtest', (req, res) => {
+  try {
+    const chartName = req.params.name;
+    const pythonScript = path.join(__dirname, '..', 'backend', 'backtester.py');
+    
+    // Construct command with config overrides if present in query parameters
+    let cmd = `python3 "${pythonScript}" --chart "${chartName}" --json`;
+    
+    if (req.query.slopeThreshold) {
+      cmd += ` --slope-threshold ${parseFloat(req.query.slopeThreshold)}`;
+    }
+    if (req.query.retestTolerance) {
+      cmd += ` --retest-tolerance ${parseFloat(req.query.retestTolerance)}`;
+    }
+    if (req.query.minWick) {
+      cmd += ` --min-wick ${parseFloat(req.query.minWick)}`;
+    }
+    if (req.query.maxEmaDist) {
+      cmd += ` --max-ema-dist ${parseFloat(req.query.maxEmaDist)}`;
+    }
+    if (req.query.target) {
+      cmd += ` --target ${parseFloat(req.query.target)}`;
+    }
+    if (req.query.stop) {
+      cmd += ` --stop ${parseFloat(req.query.stop)}`;
+    }
+    
+    exec(cmd, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Backtester error:', error, stderr);
+        return res.status(500).json({ error: 'Failed to run backtester', details: stderr || error.message });
+      }
+      try {
+        const results = JSON.parse(stdout);
+        res.json(results);
+      } catch (parseError) {
+        console.error('Failed to parse backtester JSON output:', stdout);
+        res.status(500).json({ error: 'Failed to parse backtester output', details: parseError.message, stdout });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error during backtest initiation', details: error.message });
+  }
+});
+
+// Endpoint: Run backtester optimization
+app.get('/api/charts/:name/optimize', (req, res) => {
+  try {
+    const chartName = req.params.name;
+    const pythonScript = path.join(__dirname, '..', 'backend', 'backtester.py');
+    const cmd = `python3 "${pythonScript}" --chart "${chartName}" --optimize`;
+    
+    exec(cmd, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Optimizer error:', error, stderr);
+        return res.status(500).json({ error: 'Failed to run optimizer', details: stderr || error.message });
+      }
+      try {
+        const results = JSON.parse(stdout);
+        res.json(results);
+      } catch (parseError) {
+        console.error('Failed to parse optimizer JSON output:', stdout);
+        res.status(500).json({ error: 'Failed to parse optimizer output', details: parseError.message, stdout });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error during optimization initiation', details: error.message });
   }
 });
 

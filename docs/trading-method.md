@@ -96,16 +96,16 @@ Each trade is simulated using fixed parameters which are adjusted during backtes
 
 ## 5. Parameter Optimization Log
 
-The following parameters will be iteratively tuned using the AI feedback loop (comparing `annotations.json` with `backtester.py` results):
+The following parameters have been iteratively tuned using the AI feedback loop (comparing `annotations.json` with `backtester.py` results):
 
 | Parameter Name | Description | Initial Value | Optimized Value |
 | :--- | :--- | :--- | :--- |
-| `EMAPeriod` | Lookback for Exponential Moving Average | 8 | *TBD* |
-| `ema_slope_threshold` | Min change in EMA price over 3 bricks | 2.0 pts | *TBD* |
-| `wick_retest_tolerance`| Max distance from wick extreme to EMA for a "touch" | 2.0 pts | *TBD* |
-| `max_ema_pierce` | Max distance price can overshoot EMA | 1.5 pts | *TBD* |
-| `min_wick_length` | Min tail length required to show strong rejection | 5.0 pts | *TBD* |
-| `max_ema_distance` | Max distance from brick close to EMA (over-extension) | 20.0 pts | *TBD* |
-| `congestion_lookback` | Lookback for chop/overlap checks | 6 bricks | *TBD* |
-| `target_points` | Profit target in Nasdaq points | 45.0 pts | *TBD* |
-| `stop_loss_points` | Initial stop loss in Nasdaq points | 15.0 pts | *TBD* |
+| `EMAPeriod` | Lookback for Exponential Moving Average | 8 | **8** |
+| `ema_slope_threshold` | Min change in EMA price over 3 bricks | 2.0 pts | **1.0 pt** (High Momentum Trend) |
+| `wick_retest_tolerance`| Max distance from wick extreme to EMA for a "touch" | 2.0 pts | **21.0 pts** (Fast trend trailing) |
+| `max_ema_pierce` | Max distance price can overshoot EMA | 1.5 pts | **1.5 pts** |
+| `min_wick_length` | Min tail length required to show strong rejection | 5.0 pts | **5.0 pts** |
+| `max_ema_distance` | Max distance from brick close to EMA (over-extension) | 20.0 pts | **60.0 pts** (Lagging EMA clearance) |
+| `congestion_lookback` | Lookback for chop/overlap checks | 6 bricks | **6 bricks** |
+| `target_points` | Profit target in Nasdaq points | 45.0 pts | **45.0 pts** |
+| `stop_loss_points` | Initial stop loss in Nasdaq points | 15.0 pts | **15.0 pts** |

@@ -9,6 +9,7 @@ namespace PowerLanguage.Indicator {
     public class RenkoDataExporter : IndicatorObject {
         private VariableSeries<double> m_ema;
         private List<string> m_barsJson = new List<string>();
+        private bool m_exported = false;
 
         [Input] public string FileDirectory { get; set; }
         [Input] public string FileName { get; set; }
@@ -26,25 +27,40 @@ namespace PowerLanguage.Indicator {
 
         protected override void StartCalc() {
             m_barsJson.Clear();
+            m_exported = false;
         }
 
-        protected override void OnBarUpdate() {
-            // Calculate 8 EMA on Close
-            double emaVal = Functions.SeriesAverage(Bars.Close, EMAPeriod)[0];
+        protected override void CalcBar() {
+            // Calculate 8 EMA on Close manually to avoid Functions dependency
+            double close = Bars.Close[0];
+            double emaVal;
+            if (Bars.CurrentBar <= 1) {
+                emaVal = close;
+            } else {
+                double prevEma = m_ema[1]; // retrieve value from previous bar
+                double multiplier = 2.0 / (Math.Max(1, EMAPeriod) + 1.0);
+                emaVal = (close - prevEma) * multiplier + prevEma;
+            }
             m_ema.Value = emaVal;
 
-            // Formulate bar JSON string using InvariantCulture to ensure dot-separated decimals
+            // Formulate bar JSON string by formatting values to strings first to prevent compiler/parser bugs
+            string timeStr = Bars.Time[0].ToString("yyyy-MM-ddTHH:mm:ss");
+            string openStr = Bars.Open[0].ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            string highStr = Bars.High[0].ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            string lowStr = Bars.Low[0].ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            string closeStr = Bars.Close[0].ToString("F2", System.Globalization.CultureInfo.InvariantCulture);
+            string emaStr = emaVal.ToString("F4", System.Globalization.CultureInfo.InvariantCulture);
+
             string barStr = string.Format(
-                System.Globalization.CultureInfo.InvariantCulture,
-                "{{\"time\":\"{0}\",\"open\":{1:F2},\"high\":{2:F2},\"low\":{3:F2},\"close\":{4:F2},\"ema\":{5:F4}}}",
-                Bars.Time[0].ToString("yyyy-MM-ddTHH:mm:ss"),
-                Bars.Open[0], Bars.High[0], Bars.Low[0], Bars.Close[0], emaVal
+                "{{\"time\":\"{0}\",\"open\":{1},\"high\":{2},\"low\":{3},\"close\":{4},\"ema\":{5}}}",
+                timeStr, openStr, highStr, lowStr, closeStr, emaStr
             );
             m_barsJson.Add(barStr);
 
             // Write everything to file once we hit the last bar
-            if (Bars.CurrentBar == Bars.Count) {
+            if (Bars.LastBarOnChart && !m_exported) {
                 WriteJsonFile();
+                m_exported = true;
             }
         }
 

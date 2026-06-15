@@ -6,11 +6,11 @@ from datetime import datetime
 # Default configuration settings for the strategy
 DEFAULT_CONFIG = {
     "ema_slope_period": 3,          # Number of bricks back to calculate EMA slope
-    "ema_slope_threshold": 2.0,      # Minimum slope of the EMA (points change)
-    "wick_retest_tolerance": 2.0,    # Max points the wick low/high can be from the EMA to be considered a 'touch'
+    "ema_slope_threshold": 1.0,      # Minimum slope of the EMA (points change)
+    "wick_retest_tolerance": 21.0,   # Max points the wick low/high can be from the EMA to be considered a 'touch'
     "max_ema_pierce": 1.5,          # Max points a wick can pierce past the EMA before it is considered broken
     "min_wick_length": 5.0,         # Minimum length of the rejection wick (tail) in points
-    "max_ema_distance": 20.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
+    "max_ema_distance": 60.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
     "target_points": 45.0,           # Profit target in points
     "stop_loss_points": 15.0,        # Stop loss in points
 }
@@ -275,6 +275,54 @@ def print_report(chart_name, signals, trades, matches, false_negatives, false_po
             print()
     print("=" * 60)
 
+def run_optimization(data, annotations):
+    if not annotations:
+        return DEFAULT_CONFIG.copy()
+        
+    best_config = DEFAULT_CONFIG.copy()
+    best_f1 = -1.0
+    
+    # Grid search parameters centered around typical values for 15pt Renko
+    slope_thresholds = [1.0, 2.0, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0]
+    wick_lengths = [5.0, 10.0, 15.0, 20.0, 25.0]
+    max_ema_distances = [15.0, 20.0, 30.0, 40.0, 50.0, 60.0]
+    retest_tolerances = [2.0, 5.0, 10.0, 15.0, 21.0, 25.0]
+    
+    for slope in slope_thresholds:
+        for wick in wick_lengths:
+            for dist in max_ema_distances:
+                for tol in retest_tolerances:
+                    cfg = DEFAULT_CONFIG.copy()
+                    cfg["ema_slope_threshold"] = slope
+                    cfg["min_wick_length"] = wick
+                    cfg["max_ema_distance"] = dist
+                    cfg["wick_retest_tolerance"] = tol
+                    
+                    signals, _ = run_strategy(data, cfg)
+                    matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
+                    
+                    tp = len(matches)
+                    fn = len(false_negatives)
+                    fp = len(false_positives)
+                    
+                    if tp == 0:
+                        f1 = 0.0
+                    else:
+                        precision = tp / (tp + fp)
+                        recall = tp / (tp + fn)
+                        f1 = 2 * (precision * recall) / (precision + recall)
+                        
+                    # Choose configuration that maximizes F1 alignment score
+                    if f1 > best_f1:
+                        best_f1 = f1
+                        best_config = cfg
+                    elif f1 == best_f1 and f1 > 0:
+                        # Tie-breaker: prefer smaller max_ema_distance to avoid chasing entries
+                        if cfg["max_ema_distance"] < best_config["max_ema_distance"]:
+                            best_config = cfg
+                            
+    return best_config
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Renko Strategy Backtester & Annotation Alignment Engine")
     parser.add_argument("--chart", required=True, help="Name of the chart file inside data/ (without .json)")
@@ -286,6 +334,8 @@ if __name__ == "__main__":
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
     parser.add_argument("--target", type=float, help="Override profit target points")
     parser.add_argument("--stop", type=float, help="Override stop loss points")
+    parser.add_argument("--json", action="store_true", help="Output results in JSON format")
+    parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     
     args = parser.parse_args()
  
@@ -312,10 +362,35 @@ if __name__ == "__main__":
         data = load_json_data(chart_path)
         annotations = load_annotations(annotations_path, args.chart)
         
+        if args.optimize:
+            best_config = run_optimization(data, annotations)
+            print(json.dumps(best_config, indent=2))
+            import sys
+            sys.exit(0)
+            
         signals, trades = run_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         
-        print_report(args.chart, signals, trades, matches, false_negatives, false_positives, config)
+        if args.json:
+            result = {
+                "signals": signals,
+                "trades": trades,
+                "config": config,
+                "alignment": {
+                    "matches_count": len(matches),
+                    "false_negatives_count": len(false_negatives),
+                    "false_positives_count": len(false_positives)
+                }
+            }
+            print(json.dumps(result, indent=2))
+        else:
+            print_report(args.chart, signals, trades, matches, false_negatives, false_positives, config)
         
     except Exception as e:
-        print(f"Error: {e}")
+        import sys
+        if args.json or args.optimize:
+            print(json.dumps({"error": str(e)}))
+            sys.exit(1)
+        else:
+            print(f"Error: {e}")
+            sys.exit(1)
