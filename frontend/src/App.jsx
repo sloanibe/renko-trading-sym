@@ -38,6 +38,7 @@ export default function App() {
   const [minWick, setMinWick] = useState(5.0);
   const [maxEmaDist, setMaxEmaDist] = useState(20.0);
   const [retestTolerance, setRetestTolerance] = useState(2.0);
+  const [ema24Slope, setEma24Slope] = useState(0.25);
   const [optimizing, setOptimizing] = useState(false);
 
   const fetchBacktest = async (chartName, configOverrides = {}) => {
@@ -49,9 +50,10 @@ export default function App() {
     const wick = configOverrides.minWick !== undefined ? configOverrides.minWick : minWick;
     const dist = configOverrides.maxEmaDist !== undefined ? configOverrides.maxEmaDist : maxEmaDist;
     const tol = configOverrides.retestTolerance !== undefined ? configOverrides.retestTolerance : retestTolerance;
+    const ema24Val = configOverrides.ema24Slope !== undefined ? configOverrides.ema24Slope : ema24Slope;
 
     try {
-      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}`;
+      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}&ema24Slope=${ema24Val}`;
       const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
       const data = await res.json();
       setBacktestResults(data);
@@ -170,7 +172,7 @@ export default function App() {
       setBacktestResults(null);
       setBookmark(null);
     }
-  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance]);
+  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance, ema24Slope]);
 
   const fetchCharts = async () => {
     try {
@@ -703,6 +705,23 @@ export default function App() {
                     step="0.5" 
                     value={retestTolerance} 
                     onChange={(e) => setRetestTolerance(parseFloat(e.target.value))}
+                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
+                  />
+                </div>
+
+                {/* 24 EMA Slope Threshold */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>24 EMA Slope:</span>
+                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{ema24Slope.toFixed(2)} pt</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0.00" 
+                    max="5.00" 
+                    step="0.05" 
+                    value={ema24Slope} 
+                    onChange={(e) => setEma24Slope(parseFloat(e.target.value))}
                     style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
                   />
                 </div>

@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
     "tail_break_ticks": 2,           # Failure after price exceeds the signal tail by this many ticks
     "proximity_bar_limit": 5,        # Skip signals within this many bricks of a previous signal
     "proximity_price_factor": 1.5,   # Skip if entry price is within this multiple of brick size from a previous signal
+    "ema24_slope_threshold": 0.25,   # Minimum slope of the 24 EMA (points change)
 }
 
 def load_json_data(file_path):
@@ -39,6 +40,14 @@ def run_strategy(data, config):
     signal_details = [] # Exact bar identity for charts with duplicate timestamps
     signal_by_index = {}
     
+    # Calculate 24 EMA
+    if len(data) > 0:
+        alpha_24 = 2.0 / (24.0 + 1.0)
+        current_ema24 = data[0]["close"]
+        data[0]["ema24"] = current_ema24
+        for idx in range(1, len(data)):
+            data[idx]["ema24"] = data[idx]["close"] * alpha_24 + data[idx - 1]["ema24"] * (1.0 - alpha_24)
+
     # Needs enough history to calculate EMA slope
     slope_period = config["ema_slope_period"]
     
@@ -51,10 +60,14 @@ def run_strategy(data, config):
         ema = current["ema"]
         prev_ema = prev["ema"]
         
-        if ema is None or prev_ema is None:
+        ema24 = current["ema24"]
+        prev_ema24 = prev["ema24"]
+        
+        if ema is None or prev_ema is None or ema24 is None or prev_ema24 is None:
             continue
             
         ema_slope = ema - prev_ema
+        ema24_slope = ema24 - prev_ema24
         is_up_brick = c > o
         is_down_brick = c < o
         
@@ -63,8 +76,10 @@ def run_strategy(data, config):
         prev_o = prev_bar["open"]
         
         # 1. Check Bullish Setup (Long / Buy)
-        # Trend Filter: EMA sloping upwards
-        if ema_slope >= config["ema_slope_threshold"]:
+        # Trend Filter: 8 EMA sloping upwards, 24 EMA sloping upwards, and 8 EMA above 24 EMA
+        if (ema_slope >= config["ema_slope_threshold"] and
+            ema24_slope >= config.get("ema24_slope_threshold", 0.25) and
+            ema > ema24):
             # Trigger: completed Blue (up) brick
             if is_up_brick:
                 # Bottom Wick Length
@@ -115,8 +130,10 @@ def run_strategy(data, config):
                         })
                     
         # 2. Check Bearish Setup (Short / Sell)
-        # Trend Filter: EMA sloping downwards
-        elif ema_slope <= -config["ema_slope_threshold"]:
+        # Trend Filter: 8 EMA sloping downwards, 24 EMA sloping downwards, and 8 EMA below 24 EMA
+        elif (ema_slope <= -config["ema_slope_threshold"] and
+              ema24_slope <= -config.get("ema24_slope_threshold", 0.25) and
+              ema < ema24):
             # Trigger: completed Red (down) brick
             if is_down_brick:
                 # Top Wick Length
@@ -394,6 +411,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
     parser.add_argument("--proximity-bar-limit", type=int, help="Override Proximity Box bar limit")
     parser.add_argument("--proximity-price-factor", type=float, help="Override Proximity Box price factor")
+    parser.add_argument("--ema24-slope", type=float, help="Override 24 EMA slope threshold")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     
@@ -413,6 +431,8 @@ if __name__ == "__main__":
         config["proximity_bar_limit"] = args.proximity_bar_limit
     if args.proximity_price_factor is not None:
         config["proximity_price_factor"] = args.proximity_price_factor
+    if args.ema24_slope is not None:
+        config["ema24_slope_threshold"] = args.ema24_slope
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")

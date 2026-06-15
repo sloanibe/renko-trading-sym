@@ -457,6 +457,18 @@ export default function ChartComponent({
       };
     });
 
+    // Calculate 24 EMA
+    const alpha24 = 2.0 / (24.0 + 1.0);
+    let currentEma24 = formattedData.length > 0 ? formattedData[0].close : null;
+    formattedData.forEach((item, index) => {
+      if (index === 0) {
+        item.ema24 = currentEma24;
+      } else {
+        currentEma24 = item.close * alpha24 + currentEma24 * (1.0 - alpha24);
+        item.ema24 = currentEma24;
+      }
+    });
+
     const getOriginalDate = (chartTime) => {
       const originalTime = originalTimeByChartTime.get(chartTime);
       if (!originalTime) return new Date(chartTime * 1000);
@@ -562,6 +574,13 @@ export default function ChartComponent({
     });
     emaSeriesRef.current = emaSeries;
 
+    // Add Line Series (for the 24 EMA)
+    const ema24Series = chart.addSeries(LineSeries, {
+      color: '#4f46e5',         // Indigo for 24 EMA
+      lineWidth: 2,
+      priceLineVisible: false,  // Hide horizontal current price line for 24 EMA
+    });
+
     // Populate Candlestick Series
     const candleData = formattedData.map(d => ({
       time: d.time,
@@ -595,6 +614,15 @@ export default function ChartComponent({
         value: d.ema,
       }));
     emaSeries.setData(emaData);
+
+    // Populate 24 EMA Series
+    const ema24Data = formattedData
+      .filter(d => d.ema24 !== undefined && d.ema24 !== null)
+      .map(d => ({
+        time: d.time,
+        value: d.ema24,
+      }));
+    ema24Series.setData(ema24Data);
 
     // Set initial visible range (show last 150 bars to be zoomed in and readable)
     const totalBars = formattedData.length;

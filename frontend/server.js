@@ -140,6 +140,9 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.maxEmaDist) {
       cmd += ` --max-ema-dist ${parseFloat(req.query.maxEmaDist)}`;
     }
+    if (req.query.ema24Slope) {
+      cmd += ` --ema24-slope ${parseFloat(req.query.ema24Slope)}`;
+    }
     exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         console.error('Backtester error:', error, stderr);
