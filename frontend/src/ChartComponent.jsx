@@ -811,13 +811,17 @@ export default function ChartComponent({
             let label = `EXIT #${ann.tradeIndex}`;
             
             if (ann.exitResult === 'Win') {
+              const profit = Number(ann.profitBricks) !== undefined && Number.isFinite(ann.profitBricks) ? Number(ann.profitBricks) : 2.0;
+              const profitStr = profit >= 0 ? `+${profit.toFixed(1)}` : profit.toFixed(1);
               color = '#15803d'; // Dark Forest Green
               shape = 'square';
-              label = `🏆 WIN #${ann.tradeIndex} (+2.0)`;
+              label = `🏆 WIN #${ann.tradeIndex} (${profitStr})`;
             } else if (ann.exitResult === 'Loss') {
+              const profit = Number(ann.profitBricks) !== undefined && Number.isFinite(ann.profitBricks) ? Number(ann.profitBricks) : -2.0;
+              const profitStr = profit >= 0 ? `+${profit.toFixed(1)}` : profit.toFixed(1);
               color = '#b91c1c'; // Dark Crimson Red
               shape = 'square';
-              label = `❌ LOSS #${ann.tradeIndex} (-2.0)`;
+              label = `❌ LOSS #${ann.tradeIndex} (${profitStr})`;
             } else if (ann.exitResult === 'BE') {
               color = '#475569'; // Dark Slate Gray
               shape = 'circle';

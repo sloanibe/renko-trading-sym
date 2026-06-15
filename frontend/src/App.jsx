@@ -40,7 +40,7 @@ export default function App() {
   const [retestTolerance, setRetestTolerance] = useState(2.0);
   const [ema24Slope, setEma24Slope] = useState(0.25);
   const [cooldownBars, setCooldownBars] = useState(0);
-  const [exitStrategy, setExitStrategy] = useState('trail'); // 'fixed' or 'trail' (Let Winners Run by default)
+  const [exitStrategy, setExitStrategy] = useState('stepup'); // 'fixed', 'trail', or 'stepup' (Step Up on Loss by default)
   const [hideUntakenSignals, setHideUntakenSignals] = useState(true);
   const [optimizing, setOptimizing] = useState(false);
 
@@ -793,29 +793,42 @@ export default function App() {
                 {/* Exit Strategy Selector */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
                   <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Exit Strategy Permutation:</span>
-                  <div style={{ display: 'flex', gap: '12px', marginTop: '2px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'trail' ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'stepup' ? 'var(--primary)' : 'var(--text-secondary)' }}>
                       <input 
                         type="radio" 
                         name="exitStrategy" 
-                        value="trail" 
-                        checked={exitStrategy === 'trail'} 
-                        onChange={() => setExitStrategy('trail')} 
+                        value="stepup" 
+                        checked={exitStrategy === 'stepup'} 
+                        onChange={() => setExitStrategy('stepup')} 
                         style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
                       />
-                      Winners Run
+                      Step Up on Loss
                     </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed' ? 'var(--primary)' : 'var(--text-secondary)' }}>
-                      <input 
-                        type="radio" 
-                        name="exitStrategy" 
-                        value="fixed" 
-                        checked={exitStrategy === 'fixed'} 
-                        onChange={() => setExitStrategy('fixed')} 
-                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
-                      />
-                      Fixed Target
-                    </label>
+                    <div style={{ display: 'flex', gap: '12px' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'trail' ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                        <input 
+                          type="radio" 
+                          name="exitStrategy" 
+                          value="trail" 
+                          checked={exitStrategy === 'trail'} 
+                          onChange={() => setExitStrategy('trail')} 
+                          style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                        />
+                        Winners Run
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed' ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                        <input 
+                          type="radio" 
+                          name="exitStrategy" 
+                          value="fixed" 
+                          checked={exitStrategy === 'fixed'} 
+                          onChange={() => setExitStrategy('fixed')} 
+                          style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                        />
+                        Fixed Target
+                      </label>
+                    </div>
                   </div>
                 </div>
 
@@ -915,7 +928,11 @@ export default function App() {
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Exit Strategy:</span>
                       <span style={{ fontWeight: '600', textTransform: 'capitalize', color: 'var(--primary)' }}>
-                        {backtestResults?.campaign_results?.exit_strategy === 'trail' ? 'Winners Run' : 'Fixed Target'}
+                        {backtestResults?.campaign_results?.exit_strategy === 'trail' 
+                          ? 'Winners Run' 
+                          : backtestResults?.campaign_results?.exit_strategy === 'stepup' 
+                            ? 'Step Up on Loss' 
+                            : 'Fixed Target'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>

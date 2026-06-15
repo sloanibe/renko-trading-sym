@@ -258,6 +258,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
         day_signals_by_index = {sig["barIndex"]: sig for sig in day_signals}
         
         daily_net_profit = 0.0
+        has_lost_today = False
         active_trade = None
         trade_history = []
         done_for_the_day = False
@@ -315,6 +316,35 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                                 active_trade["stop_price"] = entry_price
                                 be_triggered = True
                                 stop_price = entry_price
+                    elif exit_strategy == "stepup":
+                        hit_target = bar["high"] >= target_price
+                        if hit_stop and hit_target:
+                            daily_net_profit -= 2.0
+                            has_lost_today = True
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                            active_trade = None
+                        elif hit_stop:
+                            if has_lost_today and be_triggered:
+                                daily_net_profit += 0.0
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                            else:
+                                daily_net_profit -= 2.0
+                                has_lost_today = True
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                            active_trade = None
+                        elif hit_target:
+                            win_bricks = 1.0 if not has_lost_today else 2.0
+                            daily_net_profit += win_bricks
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": win_bricks})
+                            active_trade = None
+                        else:
+                            # Check if we trigger breakeven (only after loss)
+                            if has_lost_today:
+                                if bar["high"] >= entry_price + brick_size and not be_triggered:
+                                    active_trade["be_triggered"] = True
+                                    active_trade["stop_price"] = entry_price
+                                    be_triggered = True
+                                    stop_price = entry_price
                     else:
                         hit_target = bar["high"] >= target_price
                         if hit_stop and hit_target:
@@ -376,6 +406,35 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                                 active_trade["stop_price"] = entry_price
                                 be_triggered = True
                                 stop_price = entry_price
+                    elif exit_strategy == "stepup":
+                        hit_target = bar["low"] <= target_price
+                        if hit_stop and hit_target:
+                            daily_net_profit -= 2.0
+                            has_lost_today = True
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                            active_trade = None
+                        elif hit_stop:
+                            if has_lost_today and be_triggered:
+                                daily_net_profit += 0.0
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                            else:
+                                daily_net_profit -= 2.0
+                                has_lost_today = True
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                            active_trade = None
+                        elif hit_target:
+                            win_bricks = 1.0 if not has_lost_today else 2.0
+                            daily_net_profit += win_bricks
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": win_bricks})
+                            active_trade = None
+                        else:
+                            # Check if we trigger breakeven (only after loss)
+                            if has_lost_today:
+                                if bar["low"] <= entry_price - brick_size and not be_triggered:
+                                    active_trade["be_triggered"] = True
+                                    active_trade["stop_price"] = entry_price
+                                    be_triggered = True
+                                    stop_price = entry_price
                     else:
                         hit_target = bar["low"] <= target_price
                         if hit_stop and hit_target:
@@ -411,7 +470,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                     done_for_the_day = True
                     success_time = bar["time"]
                     break
-                    
+            
             # Check for new entries
             if active_trade is None and not done_for_the_day:
                 if i in day_signals_by_index:
@@ -419,12 +478,15 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                     direction = sig["action"]
                     entry_price = bar["close"]
                     
-                    if direction == "Buy":
-                        stop_price = entry_price - 2.0 * brick_size
-                        target_price = entry_price + 2.0 * brick_size
+                    if exit_strategy == "trail":
+                        stop_price = entry_price - 2.0 * brick_size if direction == "Buy" else entry_price + 2.0 * brick_size
+                        target_price = 999999999.0 if direction == "Buy" else -999999999.0
+                    elif exit_strategy == "stepup" and not has_lost_today:
+                        stop_price = entry_price - 2.0 * brick_size if direction == "Buy" else entry_price + 2.0 * brick_size
+                        target_price = entry_price + 1.0 * brick_size if direction == "Buy" else entry_price - 1.0 * brick_size
                     else:
-                        stop_price = entry_price + 2.0 * brick_size
-                        target_price = entry_price - 2.0 * brick_size
+                        stop_price = entry_price - 2.0 * brick_size if direction == "Buy" else entry_price + 2.0 * brick_size
+                        target_price = entry_price + 2.0 * brick_size if direction == "Buy" else entry_price - 2.0 * brick_size
                         
                     active_trade = {
                         "entry_time": bar["time"],
@@ -690,7 +752,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
     parser.add_argument("--cooldown-bars", type=int, help="Override time cool-down in bars")
     parser.add_argument("--ema24-slope", type=float, help="Override 24 EMA slope threshold")
-    parser.add_argument("--exit-strategy", choices=["fixed", "trail"], default="fixed", help="Exit strategy for daily campaign ('fixed' target vs 'trail' to opposite brick)")
+    parser.add_argument("--exit-strategy", choices=["fixed", "trail", "stepup"], default="fixed", help="Exit strategy for daily campaign ('fixed' target, 'trail' to opposite brick, or 'stepup' on loss)")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     
