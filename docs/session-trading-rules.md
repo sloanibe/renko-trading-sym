@@ -39,7 +39,7 @@ To protect capital, we implement a trailing stop-loss to entry once the trade is
 
 We evaluate the cumulative net profit of all trades taken sequentially during the daily session.
 
-*   **Session Start**: Trading begins at **06:30 AM PST** (or the first completed bar after 6:30 AM).
+*   **Session Start**: The 06:30 opening minute is observation-only. Trading begins at **06:31 AM PST**, while earlier bars remain available for EMA and market-structure history.
 *   **Trading Continuity**: We take subsequent signals sequentially as they occur throughout the day.
 *   **Win & Stop Condition**: As soon as the cumulative net profit for the day reaches **+2 bricks** (+7.5 points), we stop trading for the day and record the day as a **Win**.
 *   **No Daily Loss Limit**: If the target is not reached, we continue taking signals until the end of the day session (13:00 PST / 16:00 EST).

@@ -177,6 +177,19 @@
       }
     },
     {
+      "timestamp": "2026-06-12T11:40:25",
+      "barIndex": 115202,
+      "action": "Buy",
+      "comment": "",
+      "metrics": {
+        "open": 29697.75,
+        "high": 29701.5,
+        "low": 29694.5,
+        "close": 29701.5,
+        "ema": 29691.8622
+      }
+    },
+    {
       "timestamp": "2026-06-14T15:04:42",
       "action": "Skip",
       "comment": "This was generated as a bi but it does not have a long tail.",

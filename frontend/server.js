@@ -143,8 +143,32 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.cooldownBars !== undefined) {
       cmd += ` --cooldown-bars ${parseInt(req.query.cooldownBars, 10)}`;
     }
+    if (req.query.wickBodyOffset !== undefined) {
+      cmd += ` --wick-body-offset ${parseInt(req.query.wickBodyOffset, 10)}`;
+    }
     if (req.query.exitStrategy) {
       cmd += ` --exit-strategy ${req.query.exitStrategy}`;
+    }
+    if (req.query.startTime) {
+      cmd += ` --start-time ${req.query.startTime}`;
+    }
+    if (req.query.endTime) {
+      cmd += ` --end-time ${req.query.endTime}`;
+    }
+    if (req.query.aridLookback !== undefined) {
+      cmd += ` --arid-lookback ${parseInt(req.query.aridLookback, 10)}`;
+    }
+    if (req.query.aridMaxOverlap !== undefined) {
+      cmd += ` --arid-max-overlap ${parseFloat(req.query.aridMaxOverlap)}`;
+    }
+    if (req.query.aridMaxReversals !== undefined) {
+      cmd += ` --arid-max-reversals ${parseInt(req.query.aridMaxReversals, 10)}`;
+    }
+    if (req.query.aridSlopeThreshold !== undefined) {
+      cmd += ` --arid-slope-threshold ${parseFloat(req.query.aridSlopeThreshold)}`;
+    }
+    if (req.query.aridMinGap !== undefined) {
+      cmd += ` --arid-min-gap ${parseFloat(req.query.aridMinGap)}`;
     }
     exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ChartComponent from './ChartComponent';
 
 const API_BASE = 'http://localhost:5000/api';
+const ACTIVE_CHART_STORAGE_KEY = 'renko-active-chart';
 const bookmarkStorageKey = chartName => `renko-bookmark:${chartName}`;
 
 const metricsMatchBrick = (metrics, brick) => {
@@ -39,8 +40,17 @@ export default function App() {
   const [maxEmaDist, setMaxEmaDist] = useState(20.0);
   const [retestTolerance, setRetestTolerance] = useState(2.0);
   const [cooldownBars, setCooldownBars] = useState(0);
+  const [wickBodyOffset, setWickBodyOffset] = useState(0);
+  const [sessionStartTime, setSessionStartTime] = useState('06:31:00');
   const [exitStrategy, setExitStrategy] = useState('fixed'); // 'fixed', 'trail', or 'stepup' (Fixed Target by default)
-  const [hideUntakenSignals, setHideUntakenSignals] = useState(true);
+  const [showRawSignals, setShowRawSignals] = useState(false);
+  const [showSignalSet2, setShowSignalSet2] = useState(true);
+  const [showCampaignTrades, setShowCampaignTrades] = useState(true);
+  const [aridLookback, setAridLookback] = useState(8);
+  const [aridMaxOverlap, setAridMaxOverlap] = useState(0.5);
+  const [aridMaxReversals, setAridMaxReversals] = useState(1);
+  const [aridSlopeThreshold, setAridSlopeThreshold] = useState(4.0);
+  const [aridMinGap, setAridMinGap] = useState(0.5);
   const [optimizing, setOptimizing] = useState(false);
 
   const fetchBacktest = async (chartName, configOverrides = {}) => {
@@ -54,9 +64,26 @@ export default function App() {
     const tol = configOverrides.retestTolerance !== undefined ? configOverrides.retestTolerance : retestTolerance;
     const cooldownVal = configOverrides.cooldownBars !== undefined ? configOverrides.cooldownBars : cooldownBars;
     const exitStrategyVal = configOverrides.exitStrategy !== undefined ? configOverrides.exitStrategy : exitStrategy;
+    const wickOffset = configOverrides.wickBodyOffset !== undefined ? configOverrides.wickBodyOffset : wickBodyOffset;
+    const startTime = configOverrides.sessionStartTime !== undefined ? configOverrides.sessionStartTime : sessionStartTime;
 
     try {
-      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}&cooldownBars=${cooldownVal}&exitStrategy=${exitStrategyVal}`;
+      const params = new URLSearchParams({
+        slopeThreshold: slope,
+        minWick: wick,
+        maxEmaDist: dist,
+        retestTolerance: tol,
+        cooldownBars: cooldownVal,
+        exitStrategy: exitStrategyVal,
+        wickBodyOffset: wickOffset,
+        startTime,
+        aridLookback,
+        aridMaxOverlap,
+        aridMaxReversals,
+        aridSlopeThreshold,
+        aridMinGap,
+      });
+      const query = `?${params.toString()}`;
       const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
       const data = await res.json();
       setBacktestResults(data);
@@ -159,6 +186,12 @@ export default function App() {
     fetchAnnotations();
   }, []);
 
+  useEffect(() => {
+    if (activeChart) {
+      localStorage.setItem(ACTIVE_CHART_STORAGE_KEY, activeChart);
+    }
+  }, [activeChart]);
+
   // Fetch chart data and backtest when active selection changes or when configuration is adjusted
   useEffect(() => {
     if (activeChart) {
@@ -175,7 +208,22 @@ export default function App() {
       setBacktestResults(null);
       setBookmark(null);
     }
-  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance, cooldownBars, exitStrategy]);
+  }, [
+    activeChart,
+    slopeThreshold,
+    minWick,
+    maxEmaDist,
+    retestTolerance,
+    cooldownBars,
+    exitStrategy,
+    wickBodyOffset,
+    sessionStartTime,
+    aridLookback,
+    aridMaxOverlap,
+    aridMaxReversals,
+    aridSlopeThreshold,
+    aridMinGap,
+  ]);
 
   const fetchCharts = async () => {
     try {
@@ -183,7 +231,8 @@ export default function App() {
       const data = await res.json();
       setCharts(data);
       if (data.length > 0 && !activeChart) {
-        setActiveChart(data[0]);
+        const savedChart = localStorage.getItem(ACTIVE_CHART_STORAGE_KEY);
+        setActiveChart(savedChart && data.includes(savedChart) ? savedChart : data[0]);
       }
     } catch (err) {
       console.error('Failed to fetch charts:', err);
@@ -506,12 +555,12 @@ export default function App() {
     }
   }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, commentText]);
 
-  // Merge system signals and campaign trades (excluding user annotations) for chart display
+  // Merge user annotations, system signals, and campaign trades for chart display
   const mergedAnnotations = React.useMemo(() => {
-    const merged = [];
+    const merged = [...currentAnnotations];
     
-    // 1. Add standard system signals (only if not hidden)
-    if (!hideUntakenSignals && backtestResults?.signal_details) {
+    // 1. Add every raw strategy signal, including signals skipped by the campaign.
+    if (showRawSignals && backtestResults?.signal_details) {
       backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
         const evaluation = backtestResults.signal_evaluations?.find(
           ev => ev.barIndex === barIndex && ev.direction === action
@@ -521,20 +570,40 @@ export default function App() {
           barIndex,
           action,
           isSystem: true,
+          signalSet: 1,
           comment: 'System generated entry',
+          evaluationResult: evaluation ? evaluation.result : 'Pending',
+        });
+      });
+    }
+
+    if (showSignalSet2 && backtestResults?.signal_set_2_details) {
+      backtestResults.signal_set_2_details.forEach(({ barIndex, timestamp, action, metrics }) => {
+        const evaluation = backtestResults.signal_set_2_evaluations?.find(
+          ev => ev.barIndex === barIndex && ev.direction === action
+        );
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          signalSet: 2,
+          metrics,
+          comment: 'Arid trend signal',
           evaluationResult: evaluation ? evaluation.result : 'Pending',
         });
       });
     }
     
     // 2. Add campaign trade markers (entries & exits)
-    if (backtestResults?.campaign_results?.daily_reports) {
+    if (showCampaignTrades && backtestResults?.campaign_results?.daily_reports) {
       backtestResults.campaign_results.daily_reports.forEach(day => {
         if (day.trades) {
           day.trades.forEach((trade, idx) => {
             // Campaign Entry Marker
             merged.push({
               timestamp: trade.entry_time,
+              barIndex: trade.entry_barIndex,
               action: trade.direction,
               isCampaignEntry: true,
               tradeIndex: idx + 1,
@@ -544,6 +613,7 @@ export default function App() {
             // Campaign Exit Marker
             merged.push({
               timestamp: trade.exit_time,
+              barIndex: trade.exit_barIndex,
               action: trade.direction, // preserve direction for resolve
               direction: trade.direction,
               isCampaignExit: true,
@@ -558,7 +628,7 @@ export default function App() {
     }
     
     return merged;
-  }, [backtestResults, hideUntakenSignals]);
+  }, [currentAnnotations, backtestResults, showRawSignals, showSignalSet2, showCampaignTrades]);
 
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
@@ -773,6 +843,76 @@ export default function App() {
                   />
                 </div>
 
+                {/* Wick Body Offset (ticks) */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Wick Body Offset:</span>
+                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{wickBodyOffset} ticks</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="-30"
+                    max="10"
+                    step="1"
+                    value={wickBodyOffset}
+                    onChange={(e) => setWickBodyOffset(parseInt(e.target.value, 10))}
+                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
+                  />
+                </div>
+
+                {/* Session Start Time */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: 'var(--text-secondary)' }}>Earliest Entry:</span>
+                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{sessionStartTime}</span>
+                  </div>
+                  <input
+                    type="time"
+                    step="1"
+                    value={sessionStartTime}
+                    onChange={(e) => setSessionStartTime(e.target.value.length === 5 ? `${e.target.value}:00` : e.target.value)}
+                    style={{ width: '100%', colorScheme: 'dark' }}
+                  />
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+                  <div style={{ color: 'var(--primary)', fontWeight: '600', marginBottom: '8px' }}>
+                    Signal Set 2: Arid Trend
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Lookback</span><strong>{aridLookback} bars</strong>
+                      </span>
+                      <input type="range" min="4" max="16" step="1" value={aridLookback} onChange={(e) => setAridLookback(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#0891b2' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Maximum Wick Overlap</span><strong>{aridMaxOverlap.toFixed(2)} bricks</strong>
+                      </span>
+                      <input type="range" min="0" max="1.5" step="0.05" value={aridMaxOverlap} onChange={(e) => setAridMaxOverlap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Maximum Reversals</span><strong>{aridMaxReversals}</strong>
+                      </span>
+                      <input type="range" min="0" max="5" step="1" value={aridMaxReversals} onChange={(e) => setAridMaxReversals(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#0891b2' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>EMA Trend Strength</span><strong>{aridSlopeThreshold.toFixed(1)} pt</strong>
+                      </span>
+                      <input type="range" min="1" max="20" step="0.5" value={aridSlopeThreshold} onChange={(e) => setAridSlopeThreshold(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Minimum EMA Separation</span><strong>{aridMinGap.toFixed(2)} bricks</strong>
+                      </span>
+                      <input type="range" min="0" max="3" step="0.25" value={aridMinGap} onChange={(e) => setAridMinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
+                    </label>
+                  </div>
+                </div>
+
                 {/* Exit Strategy Selector */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
                   <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Exit Strategy Permutation:</span>
@@ -815,17 +955,38 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Hide Untaken Signals Checkbox */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
-                  <input 
-                    type="checkbox" 
-                    id="hideUntakenSignals"
-                    checked={hideUntakenSignals}
-                    onChange={(e) => setHideUntakenSignals(e.target.checked)}
-                    style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
-                  />
-                  <label htmlFor="hideUntakenSignals" style={{ color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                    Hide Untaken Signals (Unclutter)
+                {/* Chart Marker Filters */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginTop: '6px' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Chart Markers:</span>
+                  <label htmlFor="showRawSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      id="showRawSignals"
+                      checked={showRawSignals}
+                      onChange={(e) => setShowRawSignals(e.target.checked)}
+                      style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                    Raw Signal Set 1
+                  </label>
+                  <label htmlFor="showSignalSet2" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      id="showSignalSet2"
+                      checked={showSignalSet2}
+                      onChange={(e) => setShowSignalSet2(e.target.checked)}
+                      style={{ accentColor: '#0891b2', cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                    Arid Signal Set 2 ({backtestResults?.signal_set_2_details?.length || 0})
+                  </label>
+                  <label htmlFor="showCampaignTrades" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      id="showCampaignTrades"
+                      checked={showCampaignTrades}
+                      onChange={(e) => setShowCampaignTrades(e.target.checked)}
+                      style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                    Campaign Trades and Outcomes
                   </label>
                 </div>
 

@@ -14,6 +14,15 @@ DEFAULT_CONFIG = {
     "tick_size": 0.25,               # MNQ minimum price increment
     "tail_break_ticks": 2,           # Failure after price exceeds the signal tail by this many ticks
     "cooldown_bars": 0,             # Minimum number of bars to wait between signals (0 to disable)
+    "wick_body_offset_ticks": 0,    # Ticks the wick must pierce beyond previous open (positive = deeper, negative = shallower)
+    "start_time": "06:31:00",       # Skip the first minute after the session open
+    "end_time": "11:00:00",         # End of daily trading window (PST)
+    "arid_lookback": 8,
+    "arid_max_overlap_bricks": 0.5,
+    "arid_max_reversals": 1,
+    "arid_ema_slope_period": 5,
+    "arid_ema_slope_threshold": 4.0,
+    "arid_min_ema_gap_bricks": 0.5,
 }
 
 def load_json_data(file_path):
@@ -31,6 +40,162 @@ def load_annotations(annotations_path, file_key):
             return data.get(file_key, [])
         except json.JSONDecodeError:
             return []
+
+def evaluate_signal_details(data, signal_details, config):
+    evaluations = []
+    tail_break_distance = config["tick_size"] * config["tail_break_ticks"]
+
+    for signal in signal_details:
+        i = signal["barIndex"]
+        signal_bar = data[i]
+        direction = signal["action"]
+        entry_price = signal_bar["close"]
+        brick_size = abs(signal_bar["close"] - signal_bar["open"])
+        evaluation = {
+            "entry_time": signal_bar["time"],
+            "barIndex": i,
+            "direction": direction,
+            "entry_price": entry_price,
+            "brick_size": brick_size,
+            "tail_break_distance": tail_break_distance,
+            "result": "Pending",
+        }
+
+        if direction == "Buy":
+            evaluation["success_price"] = entry_price + brick_size
+            evaluation["failure_price"] = signal_bar["low"] - tail_break_distance
+        else:
+            evaluation["success_price"] = entry_price - brick_size
+            evaluation["failure_price"] = signal_bar["high"] + tail_break_distance
+
+        for j in range(i + 1, len(data)):
+            future = data[j]
+            if direction == "Buy":
+                failed = future["low"] <= evaluation["failure_price"]
+                succeeded = (
+                    future["close"] > future["open"] and
+                    future["close"] >= evaluation["success_price"]
+                )
+            else:
+                failed = future["high"] >= evaluation["failure_price"]
+                succeeded = (
+                    future["close"] < future["open"] and
+                    future["close"] <= evaluation["success_price"]
+                )
+
+            if failed:
+                evaluation["result"] = "Fail"
+                evaluation["outcome_reason"] = "Tail broken by two ticks"
+                evaluation["outcome_time"] = future["time"]
+                evaluation["outcome_barIndex"] = j
+                break
+            if succeeded:
+                evaluation["result"] = "Pass"
+                evaluation["outcome_reason"] = "One favorable brick completed"
+                evaluation["outcome_time"] = future["time"]
+                evaluation["outcome_barIndex"] = j
+                break
+
+        evaluations.append(evaluation)
+
+    return evaluations
+
+def run_arid_strategy(data, config):
+    signal_details = []
+    lookback = max(3, config["arid_lookback"])
+    slope_period = max(1, config["arid_ema_slope_period"])
+    start_index = max(lookback - 1, slope_period)
+
+    for i in range(start_index, len(data)):
+        current = data[i]
+        time_string = current["time"].split("T")[1].replace("Z", "")
+        if not config["start_time"] <= time_string <= config["end_time"]:
+            continue
+        recent = data[i - lookback + 1:i + 1]
+        brick_size = abs(current["close"] - current["open"])
+        if brick_size == 0 or current.get("ema") is None:
+            continue
+
+        slope_ema = data[i - slope_period].get("ema")
+        if slope_ema is None:
+            continue
+        ema_slope = current["ema"] - slope_ema
+
+        directions = [
+            1 if bar["close"] > bar["open"] else -1 if bar["close"] < bar["open"] else 0
+            for bar in recent
+        ]
+        reversals = sum(
+            previous != 0 and current_direction != 0 and previous != current_direction
+            for previous, current_direction in zip(directions, directions[1:])
+        )
+
+        overlap_values = []
+        for previous, bar in zip(recent, recent[1:]):
+            overlap = max(0.0, min(previous["high"], bar["high"]) - max(previous["low"], bar["low"]))
+            overlap_values.append(overlap / brick_size)
+        average_overlap = sum(overlap_values) / len(overlap_values)
+        ema_body_intersections = sum(
+            min(bar["open"], bar["close"]) <= bar["ema"] <= max(bar["open"], bar["close"])
+            for bar in recent
+            if bar.get("ema") is not None
+        )
+
+        if (
+            reversals > config["arid_max_reversals"] or
+            average_overlap > config["arid_max_overlap_bricks"] or
+            ema_body_intersections > 0
+        ):
+            continue
+
+        o, h, l, c, ema = (
+            current["open"],
+            current["high"],
+            current["low"],
+            current["close"],
+            current["ema"],
+        )
+        previous_bar = data[i - 1]
+        required_wick = min(config["min_wick_length"], brick_size)
+        minimum_gap = config["arid_min_ema_gap_bricks"] * brick_size
+        metrics = {
+            "emaSlope": ema_slope,
+            "averageOverlapBricks": average_overlap,
+            "reversals": reversals,
+            "emaBodyIntersections": ema_body_intersections,
+            "emaGapBricks": None,
+        }
+
+        if (
+            c > o and
+            ema_slope >= config["arid_ema_slope_threshold"] and
+            o - l >= required_wick and
+            l <= previous_bar["open"] and
+            l - ema >= minimum_gap
+        ):
+            metrics["emaGapBricks"] = (l - ema) / brick_size
+            signal_details.append({
+                "barIndex": i,
+                "timestamp": current["time"],
+                "action": "Buy",
+                "metrics": metrics,
+            })
+        elif (
+            c < o and
+            ema_slope <= -config["arid_ema_slope_threshold"] and
+            h - o >= required_wick and
+            h >= previous_bar["open"] and
+            ema - h >= minimum_gap
+        ):
+            metrics["emaGapBricks"] = (ema - h) / brick_size
+            signal_details.append({
+                "barIndex": i,
+                "timestamp": current["time"],
+                "action": "Sell",
+                "metrics": metrics,
+            })
+
+    return signal_details, evaluate_signal_details(data, signal_details, config)
 
 def run_strategy(data, config):
     trades = []
@@ -65,7 +230,9 @@ def run_strategy(data, config):
             
         # Immediate previous bar to check wick extensions
         prev_bar = data[i - 1]
-        prev_midpoint = (prev_bar["open"] + prev_bar["close"]) / 2.0
+        offset_distance = config.get("wick_body_offset_ticks", 0) * config.get("tick_size", 0.25)
+        buy_tail_limit = prev_bar["open"] - offset_distance
+        sell_tail_limit = prev_bar["open"] + offset_distance
         
         # Trend Filter: 8 EMA sloping upwards
         if ema_slope >= config["ema_slope_threshold"]:
@@ -89,11 +256,11 @@ def run_strategy(data, config):
                 )
                 
                 # New Rules:
-                # - Tail goes back at least to half of the previous bar's body (l <= prev_midpoint)
+                # - Tail goes back at least to the parameterized open offset (l <= buy_tail_limit)
                 # - Tail may pierce slightly below the EMA, within max_ema_pierce
                 # - Bars above the EMA for several consecutive bars (prev_3_above)
                 if (wick_length >= required_wick_length and
-                    l <= prev_midpoint and
+                    l <= buy_tail_limit and
                     l >= ema - config["max_ema_pierce"] and
                     prev_3_above and
                     body_dist <= config["max_ema_distance"]):
@@ -129,11 +296,11 @@ def run_strategy(data, config):
                 )
                 
                 # New Rules:
-                # - Tail goes back at least to half of the previous bar's body (h >= prev_midpoint)
+                # - Tail goes back at least to the parameterized open offset (h >= sell_tail_limit)
                 # - Tail may pierce slightly above the EMA, within max_ema_pierce
                 # - Bars below the EMA for several consecutive bars (prev_3_below)
                 if (wick_length >= required_wick_length and
-                    h >= prev_midpoint and
+                    h >= sell_tail_limit and
                     h <= ema + config["max_ema_pierce"] and
                     prev_3_below and
                     body_dist <= config["max_ema_distance"]):
@@ -216,13 +383,15 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
             date_to_bar_indices[date_str] = []
         date_to_bar_indices[date_str].append(i)
 
-    # Group signals by date, filtering for time >= 06:30:00 PST (local time)
+    # Group signals by date, filtering for start_time <= time <= end_time PST (local time)
+    start_time = config.get("start_time", "06:31:00")
+    end_time = config.get("end_time", "11:00:00")
     date_to_signals = {}
     for sig in signal_details:
         t = sig["timestamp"]
         date_str = t.split("T")[0]
         time_str = t.split("T")[1].replace("Z", "")
-        if time_str >= "06:30:00":
+        if start_time <= time_str <= end_time:
             if date_str not in date_to_signals:
                 date_to_signals[date_str] = []
             date_to_signals[date_str].append(sig)
@@ -258,6 +427,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                 break
                 
             bar = data[i]
+            was_in_position = active_trade is not None
             
             # Update active trade
             if active_trade is not None:
@@ -276,10 +446,10 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         if hit_stop:
                             if be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif is_opposite:
                             pnl_points = bar["close"] - entry_price
@@ -287,7 +457,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                             daily_net_profit += pnl_bricks
                             trade_history.append({
                                 **active_trade,
-                                "exit_time": bar["time"],
+                                "exit_time": bar["time"], "exit_barIndex": i,
                                 "result": "Trail",
                                 "profit_bricks": pnl_bricks
                             })
@@ -304,21 +474,21 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         if hit_stop and hit_target:
                             daily_net_profit -= 2.0
                             has_lost_today = True
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_stop:
                             if has_lost_today and be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
                                 has_lost_today = True
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_target:
                             win_bricks = 1.0 if not has_lost_today else 2.0
                             daily_net_profit += win_bricks
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": win_bricks})
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": win_bricks})
                             active_trade = None
                         else:
                             # Check if we trigger breakeven (only after loss)
@@ -333,22 +503,22 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         if hit_stop and hit_target:
                             if be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_stop:
                             if be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_target:
                             daily_net_profit += 2.0
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": 2.0})
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": 2.0})
                             active_trade = None
                         else:
                             # Check if we trigger breakeven for the next bar
@@ -366,10 +536,10 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         if hit_stop:
                             if be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif is_opposite:
                             pnl_points = entry_price - bar["close"]
@@ -377,7 +547,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                             daily_net_profit += pnl_bricks
                             trade_history.append({
                                 **active_trade,
-                                "exit_time": bar["time"],
+                                "exit_time": bar["time"], "exit_barIndex": i,
                                 "result": "Trail",
                                 "profit_bricks": pnl_bricks
                             })
@@ -394,21 +564,21 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         if hit_stop and hit_target:
                             daily_net_profit -= 2.0
                             has_lost_today = True
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_stop:
                             if has_lost_today and be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
                                 has_lost_today = True
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_target:
                             win_bricks = 1.0 if not has_lost_today else 2.0
                             daily_net_profit += win_bricks
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": win_bricks})
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": win_bricks})
                             active_trade = None
                         else:
                             # Check if we trigger breakeven (only after loss)
@@ -423,22 +593,22 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         if hit_stop and hit_target:
                             if be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_stop:
                             if be_triggered:
                                 daily_net_profit += 0.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
                                 daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
                             active_trade = None
                         elif hit_target:
                             daily_net_profit += 2.0
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": 2.0})
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": 2.0})
                             active_trade = None
                         else:
                             # Check if we trigger breakeven for the next bar
@@ -454,8 +624,9 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                     success_time = bar["time"]
                     break
             
-            # Check for new entries
-            if active_trade is None and not done_for_the_day:
+            # A signal that completes while a position is open is ignored,
+            # including a signal on the same bar that closes the position.
+            if not was_in_position and active_trade is None and not done_for_the_day:
                 if i in day_signals_by_index:
                     sig = day_signals_by_index[i]
                     direction = sig["action"]
@@ -473,6 +644,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         
                     active_trade = {
                         "entry_time": bar["time"],
+                        "entry_barIndex": i,
                         "direction": direction,
                         "entry_price": entry_price,
                         "stop_price": stop_price,
@@ -498,7 +670,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
             
             trade_history.append({
                 **active_trade,
-                "exit_time": last_bar["time"],
+                "exit_time": last_bar["time"], "exit_barIndex": last_i,
                 "result": "EndSession",
                 "profit_bricks": pnl_bricks
             })
@@ -734,7 +906,15 @@ if __name__ == "__main__":
     parser.add_argument("--min-wick", type=float, help="Override minimum wick length")
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
     parser.add_argument("--cooldown-bars", type=int, help="Override time cool-down in bars")
+    parser.add_argument("--wick-body-offset", type=int, help="Override wick body open offset in ticks (positive=deeper, negative=shallower)")
     parser.add_argument("--exit-strategy", choices=["fixed", "trail", "stepup"], default="fixed", help="Exit strategy for daily campaign ('fixed' target, 'trail' to opposite brick, or 'stepup' on loss)")
+    parser.add_argument("--start-time", default="06:31:00", help="Start time of daily trading session (PST, HH:MM:SS)")
+    parser.add_argument("--end-time", default="11:00:00", help="End time of daily trading session (PST, HH:MM:SS)")
+    parser.add_argument("--arid-lookback", type=int, help="Signal Set 2 lookback in bricks")
+    parser.add_argument("--arid-max-overlap", type=float, help="Signal Set 2 maximum average wick overlap in bricks")
+    parser.add_argument("--arid-max-reversals", type=int, help="Signal Set 2 maximum direction reversals in the lookback")
+    parser.add_argument("--arid-slope-threshold", type=float, help="Signal Set 2 minimum EMA change over its slope period")
+    parser.add_argument("--arid-min-gap", type=float, help="Signal Set 2 minimum full-wick distance from EMA in bricks")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     
@@ -752,6 +932,22 @@ if __name__ == "__main__":
         config["max_ema_distance"] = args.max_ema_dist
     if args.cooldown_bars is not None:
         config["cooldown_bars"] = args.cooldown_bars
+    if args.wick_body_offset is not None:
+        config["wick_body_offset_ticks"] = args.wick_body_offset
+    if args.start_time is not None:
+        config["start_time"] = args.start_time
+    if args.end_time is not None:
+        config["end_time"] = args.end_time
+    if args.arid_lookback is not None:
+        config["arid_lookback"] = args.arid_lookback
+    if args.arid_max_overlap is not None:
+        config["arid_max_overlap_bricks"] = args.arid_max_overlap
+    if args.arid_max_reversals is not None:
+        config["arid_max_reversals"] = args.arid_max_reversals
+    if args.arid_slope_threshold is not None:
+        config["arid_ema_slope_threshold"] = args.arid_slope_threshold
+    if args.arid_min_gap is not None:
+        config["arid_min_ema_gap_bricks"] = args.arid_min_gap
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")
@@ -768,6 +964,7 @@ if __name__ == "__main__":
             sys.exit(0)
             
         signals, signal_details, signal_evaluations = run_strategy(data, config)
+        signal_set_2_details, signal_set_2_evaluations = run_arid_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         campaign_results = run_daily_campaign(data, signal_details, config, exit_strategy=args.exit_strategy)
         
@@ -776,6 +973,8 @@ if __name__ == "__main__":
                 "signals": signals,
                 "signal_details": signal_details,
                 "signal_evaluations": signal_evaluations,
+                "signal_set_2_details": signal_set_2_details,
+                "signal_set_2_evaluations": signal_set_2_evaluations,
                 "campaign_results": campaign_results,
                 "config": config,
                 "alignment": {

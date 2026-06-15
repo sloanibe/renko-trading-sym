@@ -105,6 +105,14 @@ class RenkoOverlayRenderer {
       const ctx = scope.context;
       const horizontalPixelRatio = scope.horizontalPixelRatio;
       const verticalPixelRatio = scope.verticalPixelRatio;
+      const visibleRange = chart.timeScale().getVisibleLogicalRange();
+      const firstVisibleIndex = visibleRange
+        ? Math.max(0, Math.floor(visibleRange.from) - 1)
+        : 0;
+      const lastVisibleIndex = visibleRange
+        ? Math.min(data.length - 1, Math.ceil(visibleRange.to) + 1)
+        : data.length - 1;
+      const barSpacing = chart.timeScale().options().barSpacing;
 
       // 1. Draw Custom 15-Point Grid Lines
       const startPrice = Math.floor((minPrice - 150) / brickSize) * brickSize;
@@ -135,43 +143,53 @@ class RenkoOverlayRenderer {
       ctx.setLineDash([]);
       ctx.lineCap = 'butt';
 
-      data.forEach((item) => {
-        const time = item.time;
-        const xCoordinate = chart.timeScale().timeToCoordinate(time);
-        if (xCoordinate === null) return; // Not visible on screen
+      for (let index = firstVisibleIndex; index <= lastVisibleIndex; index += 1) {
+        const item = data[index];
+        const xCoordinate = chart.timeScale().timeToCoordinate(item.time);
+        if (xCoordinate === null) continue;
 
-        const openPrice = item.open;
-        const closePrice = item.close;
-        const highPrice = item.high;
-        const lowPrice = item.low;
-
-        let startPrice = openPrice;
-        let endPrice = openPrice;
-
-        if (closePrice > openPrice) {
-          // Up bar: wick is at the bottom, from low to open
-          startPrice = lowPrice;
-          endPrice = openPrice;
-        } else {
-          // Down bar: wick is at the top, from open to high
-          startPrice = openPrice;
-          endPrice = highPrice;
-        }
-
+        const isUp = item.close > item.open;
+        const startPrice = isUp ? item.low : item.open;
+        const endPrice = isUp ? item.open : item.high;
         const startY = series.priceToCoordinate(startPrice);
         const endY = series.priceToCoordinate(endPrice);
-
-        if (startY === null || endY === null) return;
+        if (startY === null || endY === null) continue;
 
         const x = xCoordinate * horizontalPixelRatio;
-        const yStart = startY * verticalPixelRatio;
-        const yEnd = endY * verticalPixelRatio;
-
         ctx.beginPath();
-        ctx.moveTo(x, yStart);
-        ctx.lineTo(x, yEnd);
+        ctx.moveTo(x, startY * verticalPixelRatio);
+        ctx.lineTo(x, endY * verticalPixelRatio);
         ctx.stroke();
-      });
+      }
+
+      // 3. Draw solid Renko bodies edge-to-edge, matching MultiCharts geometry.
+      ctx.lineWidth = (options.bodyBorderWidth || 1) * horizontalPixelRatio;
+      ctx.setLineDash([]);
+
+      for (let index = firstVisibleIndex; index <= lastVisibleIndex; index += 1) {
+        const item = data[index];
+        const x = chart.timeScale().timeToCoordinate(item.time);
+        if (x === null) continue;
+
+        const openY = series.priceToCoordinate(item.open);
+        const closeY = series.priceToCoordinate(item.close);
+        if (openY === null || closeY === null) continue;
+
+        const rectLeft = (x - barSpacing / 2) * horizontalPixelRatio;
+        const rectTop = Math.min(openY, closeY) * verticalPixelRatio;
+        const rectWidth = Math.max(horizontalPixelRatio, barSpacing * horizontalPixelRatio);
+        const rectHeight = Math.max(
+          verticalPixelRatio,
+          Math.abs(closeY - openY) * verticalPixelRatio
+        );
+
+        ctx.fillStyle = item.close >= item.open
+          ? (options.upColor || '#004cff')
+          : (options.downColor || '#cc1a1a');
+        ctx.strokeStyle = options.bodyBorderColor || '#000000';
+        ctx.fillRect(rectLeft, rectTop, rectWidth, rectHeight);
+        ctx.strokeRect(rectLeft, rectTop, rectWidth, rectHeight);
+      }
     });
   }
 }
@@ -545,14 +563,34 @@ export default function ChartComponent({
 
     chartRef.current = chart;
 
+    const initialPriceWindow = formattedData.slice(-150);
+    const initialMinPrice = Math.min(...initialPriceWindow.flatMap(item => [item.low, item.ema ?? item.low]));
+    const initialMaxPrice = Math.max(...initialPriceWindow.flatMap(item => [item.high, item.ema ?? item.high]));
+    const lockedPriceSpan = Math.max(30, initialMaxPrice - initialMinPrice);
+    const constantPriceSpan = original => {
+      const autoscaleInfo = original();
+      if (!autoscaleInfo) return null;
+
+      const center = (
+        autoscaleInfo.priceRange.minValue +
+        autoscaleInfo.priceRange.maxValue
+      ) / 2;
+      return {
+        ...autoscaleInfo,
+        priceRange: {
+          minValue: center - lockedPriceSpan / 2,
+          maxValue: center + lockedPriceSpan / 2,
+        },
+      };
+    };
+
     // Add Candlestick Series (for Renko Bricks + Wicks)
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
-      upColor: '#004cff',       // Lightened vibrant royal blue
-      downColor: '#cc1a1a',     // Lightened vibrant deep red
-      borderVisible: true,      // Keep borders
-      borderUpColor: '#000000', // Solid black borders for crisp definition
-      borderDownColor: '#000000',
+      upColor: 'rgba(0, 0, 0, 0)',
+      downColor: 'rgba(0, 0, 0, 0)',
+      borderVisible: false,
       wickVisible: false,      // Hide default 1px wicks (our custom primitive draws thick wicks)
+      autoscaleInfoProvider: constantPriceSpan,
     });
     candlestickSeriesRef.current = candlestickSeries;
 
@@ -561,6 +599,7 @@ export default function ChartComponent({
       color: '#008000',         // MultiCharts Green for EMA
       lineWidth: 2,
       priceLineVisible: false,  // Hide horizontal current price line for EMA
+      autoscaleInfoProvider: () => null,
     });
     emaSeriesRef.current = emaSeries;
 
@@ -582,6 +621,10 @@ export default function ChartComponent({
     const renkoOverlay = new RenkoOverlayPrimitive(formattedData, {
       wickWidth: 3, // 3 pixels wide
       wickColor: '#000000',
+      bodyBorderWidth: 1,
+      bodyBorderColor: '#000000',
+      upColor: '#004cff',
+      downColor: '#cc1a1a',
       brickSize: 15.0, // Align custom grid lines with 15pt Renko
       gridColor: 'rgba(0, 0, 0, 0.18)',
     });
@@ -656,10 +699,11 @@ export default function ChartComponent({
 
     // Handle Clicks for Annotation Placement (only on the actual bar)
     chart.subscribeClick((param) => {
-      if (!param || !param.time || !param.point) return;
+      if (!param?.point) return;
 
-      // Find the clicked Renko brick in our formatted dataset
-      const clickedBrick = formattedData.find(d => d.time === param.time);
+      const logicalIndex = chart.timeScale().coordinateToLogical(param.point.x);
+      const barIndex = logicalIndex === null ? -1 : Math.round(logicalIndex);
+      const clickedBrick = formattedData[barIndex];
       if (clickedBrick && chartContainerRef.current) {
         const yClick = param.point.y;
         const yHigh = candlestickSeries.priceToCoordinate(clickedBrick.high);
@@ -824,38 +868,38 @@ export default function ChartComponent({
               text: label,
             });
           } else if (ann.action === 'Buy') {
-            let markerText = ann.isSystem ? 'SYS BUY' : 'TEACH BUY';
+            let markerText = ann.signalSet === 2 ? 'ARID2 BUY' : ann.isSystem ? 'RAW1 BUY' : 'TEACH BUY';
             if (ann.isSystem && ann.evaluationResult) {
               if (ann.evaluationResult === 'Pass') {
-                markerText = 'SYS BUY (+)';
+                markerText = ann.signalSet === 2 ? 'ARID2 BUY (+)' : 'RAW1 BUY (+)';
               } else if (ann.evaluationResult === 'Fail') {
-                markerText = 'SYS BUY (-)';
+                markerText = ann.signalSet === 2 ? 'ARID2 BUY (-)' : 'RAW1 BUY (-)';
               } else if (ann.evaluationResult === 'Pending') {
-                markerText = 'SYS BUY (?)';
+                markerText = ann.signalSet === 2 ? 'ARID2 BUY (?)' : 'RAW1 BUY (?)';
               }
             }
             markers.push({
               time: chartTime,
               position: 'belowBar',
-              color: ann.isSystem ? '#14532d' : '#15803d', // Very dark forest green for system, dark green for user
+              color: ann.signalSet === 2 ? '#0369a1' : ann.isSystem ? '#14532d' : '#15803d',
               shape: 'arrowUp',
               text: markerText,
             });
           } else if (ann.action === 'Sell') {
-            let markerText = ann.isSystem ? 'SYS SELL' : 'TEACH SELL';
+            let markerText = ann.signalSet === 2 ? 'ARID2 SELL' : ann.isSystem ? 'RAW1 SELL' : 'TEACH SELL';
             if (ann.isSystem && ann.evaluationResult) {
               if (ann.evaluationResult === 'Pass') {
-                markerText = 'SYS SELL (+)';
+                markerText = ann.signalSet === 2 ? 'ARID2 SELL (+)' : 'RAW1 SELL (+)';
               } else if (ann.evaluationResult === 'Fail') {
-                markerText = 'SYS SELL (-)';
+                markerText = ann.signalSet === 2 ? 'ARID2 SELL (-)' : 'RAW1 SELL (-)';
               } else if (ann.evaluationResult === 'Pending') {
-                markerText = 'SYS SELL (?)';
+                markerText = ann.signalSet === 2 ? 'ARID2 SELL (?)' : 'RAW1 SELL (?)';
               }
             }
             markers.push({
               time: chartTime,
               position: 'aboveBar',
-              color: ann.isSystem ? '#7f1d1d' : '#b91c1c', // Very dark red for system, crimson for user
+              color: ann.signalSet === 2 ? '#c2410c' : ann.isSystem ? '#7f1d1d' : '#b91c1c',
               shape: 'arrowDown',
               text: markerText,
             });
