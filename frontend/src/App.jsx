@@ -40,6 +40,7 @@ export default function App() {
   const [retestTolerance, setRetestTolerance] = useState(2.0);
   const [ema24Slope, setEma24Slope] = useState(0.25);
   const [cooldownBars, setCooldownBars] = useState(0);
+  const [hideUntakenSignals, setHideUntakenSignals] = useState(true);
   const [optimizing, setOptimizing] = useState(false);
 
   const fetchBacktest = async (chartName, configOverrides = {}) => {
@@ -509,8 +510,8 @@ export default function App() {
   const mergedAnnotations = React.useMemo(() => {
     const merged = [];
     
-    // 1. Add all system signals (from backtester)
-    if (backtestResults?.signal_details) {
+    // 1. Add standard system signals (only if not hidden)
+    if (!hideUntakenSignals && backtestResults?.signal_details) {
       backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
         const evaluation = backtestResults.signal_evaluations?.find(
           ev => ev.barIndex === barIndex && ev.direction === action
@@ -556,7 +557,7 @@ export default function App() {
     }
     
     return merged;
-  }, [backtestResults]);
+  }, [backtestResults, hideUntakenSignals]);
 
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
@@ -784,6 +785,20 @@ export default function App() {
                     onChange={(e) => setCooldownBars(parseInt(e.target.value, 10))}
                     style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
                   />
+                </div>
+
+                {/* Hide Untaken Signals Checkbox */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '6px' }}>
+                  <input 
+                    type="checkbox" 
+                    id="hideUntakenSignals"
+                    checked={hideUntakenSignals}
+                    onChange={(e) => setHideUntakenSignals(e.target.checked)}
+                    style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
+                  />
+                  <label htmlFor="hideUntakenSignals" style={{ color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                    Hide Untaken Signals (Unclutter)
+                  </label>
                 </div>
 
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
