@@ -23,6 +23,11 @@ DEFAULT_CONFIG = {
     "arid_ema_slope_period": 5,
     "arid_ema_slope_threshold": 4.0,
     "arid_min_ema_gap_bricks": 0.5,
+    "set3_left_lookback": 8,
+    "set3_max_left_overlaps": 1,
+    "set3_ema_slope_period": 5,
+    "set3_ema_slope_threshold": 4.0,
+    "set3_min_ema_gap_bricks": 0.5,
 }
 
 def load_json_data(file_path):
@@ -196,6 +201,140 @@ def run_arid_strategy(data, config):
             })
 
     return signal_details, evaluate_signal_details(data, signal_details, config)
+
+def evaluate_set3_signals(data, signal_details):
+    evaluations = []
+
+    for signal in signal_details:
+        entry_index = signal["barIndex"]
+        entry_bar = data[entry_index]
+        direction = signal["action"]
+        entry_price = entry_bar["close"]
+        brick_size = abs(entry_bar["close"] - entry_bar["open"])
+        evaluation = {
+            "entry_time": entry_bar["time"],
+            "barIndex": entry_index,
+            "direction": direction,
+            "entry_price": entry_price,
+            "brick_size": brick_size,
+            "result": "Open",
+        }
+
+        for exit_index in range(entry_index + 1, len(data)):
+            exit_bar = data[exit_index]
+            is_opposing = (
+                direction == "Buy" and exit_bar["close"] < exit_bar["open"]
+            ) or (
+                direction == "Sell" and exit_bar["close"] > exit_bar["open"]
+            )
+            if not is_opposing:
+                continue
+
+            raw_profit = (
+                exit_bar["close"] - entry_price
+                if direction == "Buy"
+                else entry_price - exit_bar["close"]
+            )
+            profit_bricks = raw_profit / brick_size if brick_size else 0.0
+            evaluation.update({
+                "exit_time": exit_bar["time"],
+                "exit_barIndex": exit_index,
+                "exit_price": exit_bar["close"],
+                "profit_bricks": profit_bricks,
+                "result": "Win" if profit_bricks > 0 else "Loss" if profit_bricks < 0 else "BE",
+                "outcome_reason": "First opposing brick closed",
+            })
+            break
+
+        evaluations.append(evaluation)
+
+    return evaluations
+
+def run_no_tail_arity_strategy(data, config):
+    signal_details = []
+    if not data:
+        return signal_details, []
+
+    # Signal Set 3 is intentionally restricted to body-only Renko data.
+    has_tails = any(
+        bar["high"] > max(bar["open"], bar["close"]) or
+        bar["low"] < min(bar["open"], bar["close"])
+        for bar in data
+    )
+    if has_tails:
+        return signal_details, []
+
+    lookback = max(3, config["set3_left_lookback"])
+    slope_period = max(1, config["set3_ema_slope_period"])
+    start_index = max(lookback + 1, slope_period)
+
+    for i in range(start_index, len(data)):
+        current = data[i]
+        pullback = data[i - 1]
+        time_string = current["time"].split("T")[1].replace("Z", "")
+        if not config["start_time"] <= time_string <= config["end_time"]:
+            continue
+
+        current_direction = 1 if current["close"] > current["open"] else -1
+        pullback_direction = 1 if pullback["close"] > pullback["open"] else -1
+        if current_direction == pullback_direction:
+            continue
+
+        brick_size = abs(current["close"] - current["open"])
+        if brick_size == 0 or current.get("ema") is None or pullback.get("ema") is None:
+            continue
+
+        slope_base = data[i - slope_period].get("ema")
+        if slope_base is None:
+            continue
+        ema_slope = current["ema"] - slope_base
+        minimum_gap = config["set3_min_ema_gap_bricks"] * brick_size
+
+        current_body_low = min(current["open"], current["close"])
+        current_body_high = max(current["open"], current["close"])
+        pullback_body_low = min(pullback["open"], pullback["close"])
+        pullback_body_high = max(pullback["open"], pullback["close"])
+        left_bars = data[i - lookback - 1:i - 1]
+        left_overlaps = sum(
+            min(max(bar["open"], bar["close"]), pullback_body_high) >
+            max(min(bar["open"], bar["close"]), pullback_body_low)
+            for bar in left_bars
+        )
+        if left_overlaps > config["set3_max_left_overlaps"]:
+            continue
+
+        if current_direction > 0:
+            trend_is_strong = ema_slope >= config["set3_ema_slope_threshold"]
+            setup_is_off_ema = current_body_low - current["ema"] >= minimum_gap
+            action = "Buy"
+        else:
+            trend_is_strong = ema_slope <= -config["set3_ema_slope_threshold"]
+            setup_is_off_ema = current["ema"] - current_body_high >= minimum_gap
+            action = "Sell"
+
+        if not trend_is_strong or not setup_is_off_ema:
+            continue
+
+        signal_details.append({
+            "barIndex": i,
+            "markerBarIndex": i - 1,
+            "timestamp": current["time"],
+            "markerTimestamp": pullback["time"],
+            "action": action,
+            "metrics": {
+                "emaSlope": ema_slope,
+                "emaGapBricks": (
+                    current_body_low - current["ema"]
+                    if current_direction > 0
+                    else current["ema"] - current_body_high
+                ) / brick_size,
+                "leftOverlaps": left_overlaps,
+                "leftLookback": lookback,
+                "pullbackBarIndex": i - 1,
+            },
+        })
+
+    return signal_details, evaluate_set3_signals(data, signal_details)
 
 def run_strategy(data, config):
     trades = []
@@ -915,6 +1054,10 @@ if __name__ == "__main__":
     parser.add_argument("--arid-max-reversals", type=int, help="Signal Set 2 maximum direction reversals in the lookback")
     parser.add_argument("--arid-slope-threshold", type=float, help="Signal Set 2 minimum EMA change over its slope period")
     parser.add_argument("--arid-min-gap", type=float, help="Signal Set 2 minimum full-wick distance from EMA in bricks")
+    parser.add_argument("--set3-left-lookback", type=int, help="Signal Set 3 bars inspected for left-side congestion")
+    parser.add_argument("--set3-max-left-overlaps", type=int, help="Signal Set 3 maximum older bodies overlapping the setup")
+    parser.add_argument("--set3-slope-threshold", type=float, help="Signal Set 3 minimum EMA change over its slope period")
+    parser.add_argument("--set3-min-gap", type=float, help="Signal Set 3 minimum body distance from EMA in bricks")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     
@@ -948,6 +1091,14 @@ if __name__ == "__main__":
         config["arid_ema_slope_threshold"] = args.arid_slope_threshold
     if args.arid_min_gap is not None:
         config["arid_min_ema_gap_bricks"] = args.arid_min_gap
+    if args.set3_left_lookback is not None:
+        config["set3_left_lookback"] = args.set3_left_lookback
+    if args.set3_max_left_overlaps is not None:
+        config["set3_max_left_overlaps"] = args.set3_max_left_overlaps
+    if args.set3_slope_threshold is not None:
+        config["set3_ema_slope_threshold"] = args.set3_slope_threshold
+    if args.set3_min_gap is not None:
+        config["set3_min_ema_gap_bricks"] = args.set3_min_gap
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")
@@ -965,6 +1116,7 @@ if __name__ == "__main__":
             
         signals, signal_details, signal_evaluations = run_strategy(data, config)
         signal_set_2_details, signal_set_2_evaluations = run_arid_strategy(data, config)
+        signal_set_3_details, signal_set_3_evaluations = run_no_tail_arity_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         campaign_results = run_daily_campaign(data, signal_details, config, exit_strategy=args.exit_strategy)
         
@@ -975,6 +1127,8 @@ if __name__ == "__main__":
                 "signal_evaluations": signal_evaluations,
                 "signal_set_2_details": signal_set_2_details,
                 "signal_set_2_evaluations": signal_set_2_evaluations,
+                "signal_set_3_details": signal_set_3_details,
+                "signal_set_3_evaluations": signal_set_3_evaluations,
                 "campaign_results": campaign_results,
                 "config": config,
                 "alignment": {

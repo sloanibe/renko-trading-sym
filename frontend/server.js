@@ -170,6 +170,18 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.aridMinGap !== undefined) {
       cmd += ` --arid-min-gap ${parseFloat(req.query.aridMinGap)}`;
     }
+    if (req.query.set3LeftLookback !== undefined) {
+      cmd += ` --set3-left-lookback ${parseInt(req.query.set3LeftLookback, 10)}`;
+    }
+    if (req.query.set3MaxLeftOverlaps !== undefined) {
+      cmd += ` --set3-max-left-overlaps ${parseInt(req.query.set3MaxLeftOverlaps, 10)}`;
+    }
+    if (req.query.set3SlopeThreshold !== undefined) {
+      cmd += ` --set3-slope-threshold ${parseFloat(req.query.set3SlopeThreshold)}`;
+    }
+    if (req.query.set3MinGap !== undefined) {
+      cmd += ` --set3-min-gap ${parseFloat(req.query.set3MinGap)}`;
+    }
     exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         console.error('Backtester error:', error, stderr);

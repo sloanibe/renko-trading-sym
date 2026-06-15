@@ -868,9 +868,23 @@ export default function ChartComponent({
               text: label,
             });
           } else if (ann.action === 'Buy') {
-            let markerText = ann.signalSet === 2 ? 'ARID2 BUY' : ann.isSystem ? 'RAW1 BUY' : 'TEACH BUY';
+            if (ann.signalSet === 3) {
+              markers.push({
+                time: chartTime,
+                position: 'belowBar',
+                color: '#004cff',
+                shape: 'arrowUp',
+                text: '',
+              });
+              return;
+            }
+
+            let markerText = ann.signalSet === 3 ? 'ARITY3 BUY' : ann.signalSet === 2 ? 'ARID2 BUY' : ann.isSystem ? 'RAW1 BUY' : 'TEACH BUY';
             if (ann.isSystem && ann.evaluationResult) {
-              if (ann.evaluationResult === 'Pass') {
+              if (ann.signalSet === 3 && ['Win', 'Loss', 'BE'].includes(ann.evaluationResult)) {
+                const profit = Number.isFinite(Number(ann.profitBricks)) ? Number(ann.profitBricks) : 0;
+                markerText = `ARITY3 BUY (${profit >= 0 ? '+' : ''}${profit.toFixed(1)})`;
+              } else if (ann.evaluationResult === 'Pass') {
                 markerText = ann.signalSet === 2 ? 'ARID2 BUY (+)' : 'RAW1 BUY (+)';
               } else if (ann.evaluationResult === 'Fail') {
                 markerText = ann.signalSet === 2 ? 'ARID2 BUY (-)' : 'RAW1 BUY (-)';
@@ -881,14 +895,28 @@ export default function ChartComponent({
             markers.push({
               time: chartTime,
               position: 'belowBar',
-              color: ann.signalSet === 2 ? '#0369a1' : ann.isSystem ? '#14532d' : '#15803d',
+              color: ann.signalSet === 3 ? '#6d28d9' : ann.signalSet === 2 ? '#0369a1' : ann.isSystem ? '#14532d' : '#15803d',
               shape: 'arrowUp',
               text: markerText,
             });
           } else if (ann.action === 'Sell') {
-            let markerText = ann.signalSet === 2 ? 'ARID2 SELL' : ann.isSystem ? 'RAW1 SELL' : 'TEACH SELL';
+            if (ann.signalSet === 3) {
+              markers.push({
+                time: chartTime,
+                position: 'aboveBar',
+                color: '#cc1a1a',
+                shape: 'arrowDown',
+                text: '',
+              });
+              return;
+            }
+
+            let markerText = ann.signalSet === 3 ? 'ARITY3 SELL' : ann.signalSet === 2 ? 'ARID2 SELL' : ann.isSystem ? 'RAW1 SELL' : 'TEACH SELL';
             if (ann.isSystem && ann.evaluationResult) {
-              if (ann.evaluationResult === 'Pass') {
+              if (ann.signalSet === 3 && ['Win', 'Loss', 'BE'].includes(ann.evaluationResult)) {
+                const profit = Number.isFinite(Number(ann.profitBricks)) ? Number(ann.profitBricks) : 0;
+                markerText = `ARITY3 SELL (${profit >= 0 ? '+' : ''}${profit.toFixed(1)})`;
+              } else if (ann.evaluationResult === 'Pass') {
                 markerText = ann.signalSet === 2 ? 'ARID2 SELL (+)' : 'RAW1 SELL (+)';
               } else if (ann.evaluationResult === 'Fail') {
                 markerText = ann.signalSet === 2 ? 'ARID2 SELL (-)' : 'RAW1 SELL (-)';
@@ -899,7 +927,7 @@ export default function ChartComponent({
             markers.push({
               time: chartTime,
               position: 'aboveBar',
-              color: ann.signalSet === 2 ? '#c2410c' : ann.isSystem ? '#7f1d1d' : '#b91c1c',
+              color: ann.signalSet === 3 ? '#7c3aed' : ann.signalSet === 2 ? '#c2410c' : ann.isSystem ? '#7f1d1d' : '#b91c1c',
               shape: 'arrowDown',
               text: markerText,
             });

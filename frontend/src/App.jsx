@@ -45,12 +45,17 @@ export default function App() {
   const [exitStrategy, setExitStrategy] = useState('fixed'); // 'fixed', 'trail', or 'stepup' (Fixed Target by default)
   const [showRawSignals, setShowRawSignals] = useState(false);
   const [showSignalSet2, setShowSignalSet2] = useState(true);
+  const [showSignalSet3, setShowSignalSet3] = useState(true);
   const [showCampaignTrades, setShowCampaignTrades] = useState(true);
   const [aridLookback, setAridLookback] = useState(8);
   const [aridMaxOverlap, setAridMaxOverlap] = useState(0.5);
   const [aridMaxReversals, setAridMaxReversals] = useState(1);
   const [aridSlopeThreshold, setAridSlopeThreshold] = useState(4.0);
   const [aridMinGap, setAridMinGap] = useState(0.5);
+  const [set3LeftLookback, setSet3LeftLookback] = useState(8);
+  const [set3MaxLeftOverlaps, setSet3MaxLeftOverlaps] = useState(1);
+  const [set3SlopeThreshold, setSet3SlopeThreshold] = useState(4.0);
+  const [set3MinGap, setSet3MinGap] = useState(0.5);
   const [optimizing, setOptimizing] = useState(false);
 
   const fetchBacktest = async (chartName, configOverrides = {}) => {
@@ -82,6 +87,10 @@ export default function App() {
         aridMaxReversals,
         aridSlopeThreshold,
         aridMinGap,
+        set3LeftLookback,
+        set3MaxLeftOverlaps,
+        set3SlopeThreshold,
+        set3MinGap,
       });
       const query = `?${params.toString()}`;
       const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
@@ -223,6 +232,10 @@ export default function App() {
     aridMaxReversals,
     aridSlopeThreshold,
     aridMinGap,
+    set3LeftLookback,
+    set3MaxLeftOverlaps,
+    set3SlopeThreshold,
+    set3MinGap,
   ]);
 
   const fetchCharts = async () => {
@@ -594,6 +607,26 @@ export default function App() {
         });
       });
     }
+
+    if (showSignalSet3 && backtestResults?.signal_set_3_details) {
+      backtestResults.signal_set_3_details.forEach(({ barIndex, markerBarIndex, timestamp, markerTimestamp, action, metrics }) => {
+        const evaluation = backtestResults.signal_set_3_evaluations?.find(
+          ev => ev.barIndex === barIndex && ev.direction === action
+        );
+        merged.push({
+          timestamp: markerTimestamp || timestamp,
+          barIndex: Number.isInteger(markerBarIndex) ? markerBarIndex : barIndex,
+          entryBarIndex: barIndex,
+          action,
+          isSystem: true,
+          signalSet: 3,
+          metrics,
+          comment: 'No-tail arity trend resumption',
+          evaluationResult: evaluation ? evaluation.result : 'Open',
+          profitBricks: evaluation?.profit_bricks,
+        });
+      });
+    }
     
     // 2. Add campaign trade markers (entries & exits)
     if (showCampaignTrades && backtestResults?.campaign_results?.daily_reports) {
@@ -628,7 +661,7 @@ export default function App() {
     }
     
     return merged;
-  }, [currentAnnotations, backtestResults, showRawSignals, showSignalSet2, showCampaignTrades]);
+  }, [currentAnnotations, backtestResults, showRawSignals, showSignalSet2, showSignalSet3, showCampaignTrades]);
 
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
@@ -913,6 +946,38 @@ export default function App() {
                   </div>
                 </div>
 
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+                  <div style={{ color: '#7c3aed', fontWeight: '600', marginBottom: '8px' }}>
+                    Signal Set 3: No-Tail Arity
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Left-Side Lookback</span><strong>{set3LeftLookback} bars</strong>
+                      </span>
+                      <input type="range" min="3" max="30" step="1" value={set3LeftLookback} onChange={(e) => setSet3LeftLookback(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#7c3aed' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Maximum Left Overlaps</span><strong>{set3MaxLeftOverlaps}</strong>
+                      </span>
+                      <input type="range" min="0" max="8" step="1" value={set3MaxLeftOverlaps} onChange={(e) => setSet3MaxLeftOverlaps(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#7c3aed' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>EMA Trend Strength</span><strong>{set3SlopeThreshold.toFixed(1)} pt</strong>
+                      </span>
+                      <input type="range" min="1" max="20" step="0.5" value={set3SlopeThreshold} onChange={(e) => setSet3SlopeThreshold(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Minimum EMA Separation</span><strong>{set3MinGap.toFixed(2)} bricks</strong>
+                      </span>
+                      <input type="range" min="0" max="3" step="0.25" value={set3MinGap} onChange={(e) => setSet3MinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
+                    </label>
+                  </div>
+                </div>
+
                 {/* Exit Strategy Selector */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
                   <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Exit Strategy Permutation:</span>
@@ -977,6 +1042,16 @@ export default function App() {
                       style={{ accentColor: '#0891b2', cursor: 'pointer', width: '16px', height: '16px' }}
                     />
                     Arid Signal Set 2 ({backtestResults?.signal_set_2_details?.length || 0})
+                  </label>
+                  <label htmlFor="showSignalSet3" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      id="showSignalSet3"
+                      checked={showSignalSet3}
+                      onChange={(e) => setShowSignalSet3(e.target.checked)}
+                      style={{ accentColor: '#7c3aed', cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                    No-Tail Arity Set 3 ({backtestResults?.signal_set_3_details?.length || 0})
                   </label>
                   <label htmlFor="showCampaignTrades" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
                     <input
