@@ -542,6 +542,9 @@ export default function App() {
     const totalLabeled = matches + missed;
     const alignmentRate = totalLabeled > 0 ? (matches / totalLabeled * 100).toFixed(1) : '0.0';
     
+    const campaign = backtestResults.campaign_results || {};
+    const campaignSummary = campaign.summary || {};
+
     return {
       totalSignals: evaluations.length,
       passed,
@@ -552,7 +555,13 @@ export default function App() {
       missed,
       overTriggers,
       alignmentRate,
-      totalLabeled
+      totalLabeled,
+      campaignTotalDays: campaignSummary.total_days || 0,
+      campaignWinningDays: campaignSummary.winning_days || 0,
+      campaignLosingDays: campaignSummary.losing_days || 0,
+      campaignWinRate: campaignSummary.win_rate !== undefined ? campaignSummary.win_rate.toFixed(1) : '0.0',
+      campaignAvgTime: campaignSummary.avg_success_time || 'N/A',
+      campaignMaxDrawdown: campaignSummary.max_drawdown_bricks !== undefined ? campaignSummary.max_drawdown_bricks.toFixed(1) : '0.0',
     };
   }, [backtestResults]);
 
@@ -796,6 +805,34 @@ export default function App() {
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Over-Triggers (FP):</span>
                       <span style={{ fontWeight: '600', color: stats.overTriggers > 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.overTriggers}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+                  <h4 style={{ color: '#a855f7', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>🎯</span> Session Campaign (Opt. B)
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Trading Days:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.campaignTotalDays} days</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Winning Days (+2):</span>
+                      <span style={{ fontWeight: '600', color: '#10b981' }}>{stats.campaignWinningDays} ({stats.campaignWinRate}%)</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Losing/Flat Days:</span>
+                      <span style={{ fontWeight: '600', color: stats.campaignLosingDays > 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.campaignLosingDays}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Avg Time to Success:</span>
+                      <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{stats.campaignAvgTime}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Max Drawdown:</span>
+                      <span style={{ fontWeight: '600', color: parseFloat(stats.campaignMaxDrawdown) < 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.campaignMaxDrawdown} bricks</span>
                     </div>
                   </div>
                 </div>

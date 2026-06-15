@@ -244,6 +244,234 @@ def run_strategy(data, config):
 
     return signals, signal_details, trades
 
+def run_daily_campaign(data, signal_details, config):
+    # Group bar indices by date YYYY-MM-DD
+    date_to_bar_indices = {}
+    for i, bar in enumerate(data):
+        date_str = bar["time"].split("T")[0]
+        if date_str not in date_to_bar_indices:
+            date_to_bar_indices[date_str] = []
+        date_to_bar_indices[date_str].append(i)
+
+    # Group signals by date, filtering for time >= 06:30:00 PST (local time)
+    date_to_signals = {}
+    for sig in signal_details:
+        t = sig["timestamp"]
+        date_str = t.split("T")[0]
+        time_str = t.split("T")[1].replace("Z", "")
+        if time_str >= "06:30:00":
+            if date_str not in date_to_signals:
+                date_to_signals[date_str] = []
+            date_to_signals[date_str].append(sig)
+
+    daily_reports = []
+    
+    # We sort dates chronologically
+    sorted_dates = sorted(date_to_bar_indices.keys())
+    
+    for date_str in sorted_dates:
+        day_signals = date_to_signals.get(date_str, [])
+        if not day_signals:
+            continue
+            
+        bar_indices = date_to_bar_indices[date_str]
+        day_signals_by_index = {sig["barIndex"]: sig for sig in day_signals}
+        
+        daily_net_profit = 0.0
+        active_trade = None
+        trade_history = []
+        done_for_the_day = False
+        success_time = None
+        
+        # We assume the brick size is constant or can be derived from the first bar of the day
+        first_bar = data[bar_indices[0]]
+        brick_size = abs(first_bar["close"] - first_bar["open"])
+        if brick_size == 0:
+            brick_size = 3.75 # Fallback to standard MNQ 15-tick brick size in points
+            
+        for i in bar_indices:
+            if done_for_the_day:
+                break
+                
+            bar = data[i]
+            
+            # Update active trade
+            if active_trade is not None:
+                direction = active_trade["direction"]
+                entry_price = active_trade["entry_price"]
+                stop_price = active_trade["stop_price"]
+                target_price = active_trade["target_price"]
+                be_triggered = active_trade["be_triggered"]
+                
+                if direction == "Buy":
+                    # Check exits first
+                    hit_stop = bar["low"] <= stop_price
+                    hit_target = bar["high"] >= target_price
+                    
+                    if hit_stop and hit_target:
+                        if be_triggered:
+                            daily_net_profit += 0.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                        else:
+                            daily_net_profit -= 2.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                        active_trade = None
+                    elif hit_stop:
+                        if be_triggered:
+                            daily_net_profit += 0.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                        else:
+                            daily_net_profit -= 2.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                        active_trade = None
+                    elif hit_target:
+                        daily_net_profit += 2.0
+                        trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": 2.0})
+                        active_trade = None
+                    else:
+                        # Check if we trigger breakeven for the next bar
+                        if bar["high"] >= entry_price + brick_size and not be_triggered:
+                            active_trade["be_triggered"] = True
+                            active_trade["stop_price"] = entry_price
+                            be_triggered = True
+                            stop_price = entry_price
+                else: # Sell
+                    # Check exits first
+                    hit_stop = bar["high"] >= stop_price
+                    hit_target = bar["low"] <= target_price
+                    
+                    if hit_stop and hit_target:
+                        if be_triggered:
+                            daily_net_profit += 0.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                        else:
+                            daily_net_profit -= 2.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                        active_trade = None
+                    elif hit_stop:
+                        if be_triggered:
+                            daily_net_profit += 0.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "BE", "profit_bricks": 0.0})
+                        else:
+                            daily_net_profit -= 2.0
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Loss", "profit_bricks": -2.0})
+                        active_trade = None
+                    elif hit_target:
+                        daily_net_profit += 2.0
+                        trade_history.append({**active_trade, "exit_time": bar["time"], "result": "Win", "profit_bricks": 2.0})
+                        active_trade = None
+                    else:
+                        # Check if we trigger breakeven for the next bar
+                        if bar["low"] <= entry_price - brick_size and not be_triggered:
+                            active_trade["be_triggered"] = True
+                            active_trade["stop_price"] = entry_price
+                            be_triggered = True
+                            stop_price = entry_price
+                            
+                # Check target hit
+                if daily_net_profit >= 2.0:
+                    done_for_the_day = True
+                    success_time = bar["time"]
+                    break
+                    
+            # Check for new entries
+            if active_trade is None and not done_for_the_day:
+                if i in day_signals_by_index:
+                    sig = day_signals_by_index[i]
+                    direction = sig["action"]
+                    entry_price = bar["close"]
+                    
+                    if direction == "Buy":
+                        stop_price = entry_price - 2.0 * brick_size
+                        target_price = entry_price + 2.0 * brick_size
+                    else:
+                        stop_price = entry_price + 2.0 * brick_size
+                        target_price = entry_price - 2.0 * brick_size
+                        
+                    active_trade = {
+                        "entry_time": bar["time"],
+                        "direction": direction,
+                        "entry_price": entry_price,
+                        "stop_price": stop_price,
+                        "target_price": target_price,
+                        "be_triggered": False,
+                    }
+                    
+        # Close open positions at the end of the day session
+        if active_trade is not None and not done_for_the_day:
+            last_i = bar_indices[-1]
+            last_bar = data[last_i]
+            close_price = last_bar["close"]
+            direction = active_trade["direction"]
+            entry_price = active_trade["entry_price"]
+            
+            if direction == "Buy":
+                pnl_points = close_price - entry_price
+            else:
+                pnl_points = entry_price - close_price
+                
+            pnl_bricks = pnl_points / brick_size
+            daily_net_profit += pnl_bricks
+            
+            trade_history.append({
+                **active_trade,
+                "exit_time": last_bar["time"],
+                "result": "EndSession",
+                "profit_bricks": pnl_bricks
+            })
+            active_trade = None
+
+        daily_reports.append({
+            "date": date_str,
+            "net_profit_bricks": daily_net_profit,
+            "result": "Win" if daily_net_profit >= 2.0 else "Loss/Flat",
+            "success_time": success_time,
+            "trades_count": len(trade_history),
+            "trades": trade_history
+        })
+        
+    # Calculate global campaign statistics
+    total_days = len(daily_reports)
+    winning_days = len([d for d in daily_reports if d["result"] == "Win"])
+    losing_days = total_days - winning_days
+    win_rate = (winning_days / total_days * 100) if total_days > 0 else 0.0
+    
+    # Calculate average time to success (in minutes from 06:30 AM PST)
+    success_times_min = []
+    for d in daily_reports:
+        if d["result"] == "Win" and d["success_time"]:
+            time_part = d["success_time"].split("T")[1].replace("Z", "")
+            h, m, s = map(int, time_part.split(":"))
+            total_minutes = h * 60 + m
+            success_times_min.append(total_minutes)
+            
+    avg_success_time_str = "N/A"
+    if success_times_min:
+        avg_minutes = sum(success_times_min) / len(success_times_min)
+        avg_h = int(avg_minutes // 60)
+        avg_m = int(avg_minutes % 60)
+        avg_success_time_str = f"{avg_h:02d}:{avg_m:02d} PST"
+        
+    max_drawdown = 0.0
+    for d in daily_reports:
+        running_pnl = 0.0
+        for t in d["trades"]:
+            running_pnl += t.get("profit_bricks", 0.0)
+            if running_pnl < max_drawdown:
+                max_drawdown = running_pnl
+            
+    return {
+        "daily_reports": daily_reports,
+        "summary": {
+            "total_days": total_days,
+            "winning_days": winning_days,
+            "losing_days": losing_days,
+            "win_rate": win_rate,
+            "avg_success_time": avg_success_time_str,
+            "max_drawdown_bricks": max_drawdown
+        }
+    }
+
 def analyze_alignment(signals, annotations, data):
     # Map raw data timestamp to bar details for easy retrieval
     data_map = {d["time"]: d for d in data}
@@ -294,7 +522,7 @@ def analyze_alignment(signals, annotations, data):
 
     return matches, false_negatives, false_positives
 
-def print_report(chart_name, signals, evaluations, matches, false_negatives, false_positives, config):
+def print_report(chart_name, signals, evaluations, matches, false_negatives, false_positives, config, campaign_results=None):
     print("=" * 60)
     print(f" RENKO BACKTEST & ALIGNMENT REPORT: {chart_name}")
     print("=" * 60)
@@ -350,6 +578,17 @@ def print_report(chart_name, signals, evaluations, matches, false_negatives, fal
             if fp['comment']:
                 print(f"    - Your note:     \"{fp['comment']}\"")
             print()
+    print("-" * 60)
+
+    if campaign_results:
+        summary = campaign_results["summary"]
+        print("Daily Session Campaign (Option B):")
+        print(f"  - Total Trading Days: {summary['total_days']}")
+        print(f"  - Winning Days (+2 bricks target): {summary['winning_days']} ({summary['win_rate']:.2f}%)")
+        print(f"  - Losing/Flat Days: {summary['losing_days']}")
+        print(f"  - Average Time to Success: {summary['avg_success_time']}")
+        print(f"  - Max Daily Drawdown: {summary['max_drawdown_bricks']:.2f} bricks")
+    
     print("=" * 60)
 
 def run_optimization(data, annotations):
@@ -450,12 +689,14 @@ if __name__ == "__main__":
             
         signals, signal_details, signal_evaluations = run_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
+        campaign_results = run_daily_campaign(data, signal_details, config)
         
         if args.json:
             result = {
                 "signals": signals,
                 "signal_details": signal_details,
                 "signal_evaluations": signal_evaluations,
+                "campaign_results": campaign_results,
                 "config": config,
                 "alignment": {
                     "matches_count": len(matches),
@@ -473,6 +714,7 @@ if __name__ == "__main__":
                 false_negatives,
                 false_positives,
                 config,
+                campaign_results
             )
         
     except Exception as e:
