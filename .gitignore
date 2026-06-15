@@ -31,3 +31,6 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
+
+# Transient chart selection shared with Codex
+data/ai_selection.json

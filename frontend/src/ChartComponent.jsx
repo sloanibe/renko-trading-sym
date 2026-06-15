@@ -1,5 +1,18 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
+
+const SESSION_OPEN_TIME = '06:30:00';
+
+const getSessionOpenIndices = (data) => {
+  const firstBarByDate = new Map();
+  data.forEach((bar, index) => {
+    const [date, time = ''] = bar.time.replace('Z', '').split('T');
+    if (time >= SESSION_OPEN_TIME && !firstBarByDate.has(date)) {
+      firstBarByDate.set(date, index);
+    }
+  });
+  return [...firstBarByDate.values()];
+};
 
 // Combined Renko overlay primitive for drawing 15-point custom grid lines and bold wicks
 class RenkoOverlayPrimitive {
@@ -119,6 +132,7 @@ class RenkoOverlayRenderer {
       // 2. Draw Bold 3px Wicks (on top of grid lines)
       ctx.lineWidth = (options.wickWidth || 3) * horizontalPixelRatio;
       ctx.strokeStyle = options.wickColor || '#000000';
+      ctx.setLineDash([]);
       ctx.lineCap = 'butt';
 
       data.forEach((item) => {
@@ -162,14 +176,111 @@ class RenkoOverlayRenderer {
   }
 }
 
+class SessionDividerPrimitive {
+  constructor(times, options = {}) {
+    this._times = times;
+    this._options = options;
+    this._chart = null;
+    this._paneViews = [new SessionDividerPaneView(this)];
+  }
 
-export default function ChartComponent({ data, annotations, onBrickClick }) {
+  attached(param) {
+    this._chart = param.chart;
+  }
+
+  detached() {
+    this._chart = null;
+  }
+
+  updateAllViews() {
+    this._paneViews.forEach(view => view.update());
+  }
+
+  paneViews() {
+    return this._paneViews;
+  }
+
+  get chart() {
+    return this._chart;
+  }
+
+  get times() {
+    return this._times;
+  }
+
+  get options() {
+    return this._options;
+  }
+}
+
+class SessionDividerPaneView {
+  constructor(primitive) {
+    this._primitive = primitive;
+    this._positions = [];
+  }
+
+  update() {
+    const timeScale = this._primitive.chart?.timeScale();
+    this._positions = timeScale
+      ? this._primitive.times
+          .map(time => timeScale.timeToCoordinate(time))
+          .filter(position => position !== null)
+      : [];
+  }
+
+  zOrder() {
+    return 'top';
+  }
+
+  renderer() {
+    return new SessionDividerRenderer(this._positions, this._primitive.options);
+  }
+}
+
+class SessionDividerRenderer {
+  constructor(positions, options) {
+    this._positions = positions;
+    this._options = options;
+  }
+
+  draw(target) {
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context;
+      const pixelRatio = scope.horizontalPixelRatio;
+      ctx.lineWidth = (this._options.lineWidth || 2) * pixelRatio;
+      ctx.strokeStyle = this._options.color || '#363636';
+      ctx.setLineDash([9 * pixelRatio, 7 * pixelRatio]);
+
+      this._positions.forEach((position) => {
+        const x = position * pixelRatio;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, scope.bitmapSize.height);
+        ctx.stroke();
+      });
+
+      ctx.setLineDash([]);
+    });
+  }
+}
+
+
+export default function ChartComponent({
+  data,
+  annotations,
+  onBrickClick,
+  bookmark,
+  onSetBookmark,
+  onClearBookmark,
+}) {
   const chartContainerRef = useRef(null);
   const chartRef = useRef(null);
   const candlestickSeriesRef = useRef(null);
   const emaSeriesRef = useRef(null);
   const markersPluginRef = useRef(null);
   const sliderRef = useRef(null);
+  const crosshairBarIndexRef = useRef(null);
+  const [contextMenu, setContextMenu] = useState(null);
 
   // Button & Slider Handlers
   const handleSliderInput = (e) => {
@@ -249,6 +360,49 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
     }
   };
 
+  const goToBarIndex = (barIndex) => {
+    const chart = chartRef.current;
+    if (!chart || !data || !Number.isInteger(barIndex)) return;
+
+    const currentRange = chart.timeScale().getVisibleLogicalRange();
+    const width = currentRange ? currentRange.to - currentRange.from : Math.min(150, data.length);
+    const safeWidth = Math.max(10, Math.min(width, data.length));
+    const maxFrom = Math.max(0, data.length - safeWidth);
+    const from = Math.max(0, Math.min(maxFrom, barIndex - safeWidth / 2));
+    chart.timeScale().setVisibleLogicalRange({
+      from,
+      to: from + safeWidth,
+    });
+  };
+
+  const handleGoToBookmark = () => {
+    goToBarIndex(bookmark?.barIndex);
+  };
+
+  const getNavigationAnchorIndex = () => {
+    if (Number.isInteger(crosshairBarIndexRef.current)) {
+      return crosshairBarIndexRef.current;
+    }
+    const range = chartRef.current?.timeScale().getVisibleLogicalRange();
+    if (!range || !data?.length) return data.length - 1;
+    return Math.max(0, Math.min(data.length - 1, Math.round((range.from + range.to) / 2)));
+  };
+
+  const handleGoToSessionOpen = () => {
+    const sessionOpens = getSessionOpenIndices(data || []);
+    const anchorIndex = getNavigationAnchorIndex();
+    const currentSession = sessionOpens.filter(index => index <= anchorIndex).at(-1);
+    if (Number.isInteger(currentSession)) goToBarIndex(currentSession);
+  };
+
+  const handleGoToPreviousSession = () => {
+    const sessionOpens = getSessionOpenIndices(data || []);
+    const anchorIndex = getNavigationAnchorIndex();
+    const currentPosition = sessionOpens.findLastIndex(index => index <= anchorIndex);
+    const previousSession = sessionOpens[currentPosition - 1];
+    if (Number.isInteger(previousSession)) goToBarIndex(previousSession);
+  };
+
   const handleZoomIn = () => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -281,6 +435,46 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
 
   useEffect(() => {
     if (!chartContainerRef.current || !data || data.length === 0) return;
+
+    // Lightweight Charts requires unique ascending times. Keep those internal
+    // chart keys separate from the original MultiCharts completion timestamps.
+    const originalTimeByChartTime = new Map();
+    const barIndexByChartTime = new Map();
+    let lastTime = 0;
+    const formattedData = data.map((item, index) => {
+      let chartTime = Math.floor(Date.parse(item.time.endsWith('Z') ? item.time : `${item.time}Z`) / 1000);
+      if (isNaN(chartTime) || chartTime <= lastTime) {
+        chartTime = lastTime + 1;
+      }
+      lastTime = chartTime;
+      originalTimeByChartTime.set(chartTime, item.time);
+      barIndexByChartTime.set(chartTime, index);
+      return {
+        ...item,
+        originalTime: item.time,
+        originalIndex: index,
+        time: chartTime,
+      };
+    });
+
+    const getOriginalDate = (chartTime) => {
+      const originalTime = originalTimeByChartTime.get(chartTime);
+      if (!originalTime) return new Date(chartTime * 1000);
+      return new Date(originalTime.endsWith('Z') ? originalTime : `${originalTime}Z`);
+    };
+
+    const formatOriginalTime = (chartTime, includeDate = false) => {
+      const date = getOriginalDate(chartTime);
+      const hours = String(date.getUTCHours()).padStart(2, '0');
+      const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+      const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+      if (!includeDate) return `${hours}:${minutes}:${seconds}`;
+
+      const year = date.getUTCFullYear();
+      const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(date.getUTCDate()).padStart(2, '0');
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    };
 
     // Create Chart Instance
     const chart = createChart(chartContainerRef.current, {
@@ -323,8 +517,8 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
         timeVisible: true,
         secondsVisible: true,
         barSpacing: 18, // Zoom in by default to make wicks and bars visually thicker
-        tickMarkFormatter: (time, tickMarkType, locale) => {
-          const date = new Date(time * 1000);
+        tickMarkFormatter: (time, tickMarkType) => {
+          const date = getOriginalDate(time);
           const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
           switch (tickMarkType) {
             case 0: // Year
@@ -335,10 +529,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
               return String(date.getUTCDate());
             case 3: // Time
             case 4: // TimeWithSeconds
-              const hours = String(date.getUTCHours()).padStart(2, '0');
-              const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-              const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-              return `${hours}:${minutes}:${seconds}`;
+              return formatOriginalTime(time);
             default:
               return '';
           }
@@ -346,16 +537,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       },
       localization: {
         locale: 'en-US',
-        timeFormatter: (timestamp) => {
-          const date = new Date(timestamp * 1000);
-          const year = date.getUTCFullYear();
-          const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-          const day = String(date.getUTCDate()).padStart(2, '0');
-          const hours = String(date.getUTCHours()).padStart(2, '0');
-          const minutes = String(date.getUTCMinutes()).padStart(2, '0');
-          const seconds = String(date.getUTCSeconds()).padStart(2, '0');
-          return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
-        },
+        timeFormatter: (timestamp) => formatOriginalTime(timestamp, true),
       },
     });
 
@@ -380,25 +562,6 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
     });
     emaSeriesRef.current = emaSeries;
 
-    // Format Data & ensure strict ascending timestamps (TradingView requirement)
-    let lastTime = 0;
-    const formattedData = data.map(item => {
-      // Append 'Z' to treat the date as UTC and prevent timezone offsets on display
-      let t = Math.floor(Date.parse(item.time + 'Z') / 1000);
-      if (isNaN(t)) {
-        t = lastTime + 1;
-      }
-      if (t <= lastTime) {
-        t = lastTime + 1;
-      }
-      lastTime = t;
-      return {
-        ...item,
-        originalTime: item.time, // Preserve original ISO string for annotation keys
-        time: t,
-      };
-    });
-
     // Populate Candlestick Series
     const candleData = formattedData.map(d => ({
       time: d.time,
@@ -409,6 +572,8 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
     }));
     candlestickSeries.setData(candleData);
 
+    const sessionOpenTimes = getSessionOpenIndices(data).map(index => formattedData[index].time);
+
     // Attach custom bold wicks and 15pt grid overlay primitive
     const renkoOverlay = new RenkoOverlayPrimitive(formattedData, {
       wickWidth: 3, // 3 pixels wide
@@ -417,6 +582,10 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       gridColor: 'rgba(0, 0, 0, 0.18)',
     });
     candlestickSeries.attachPrimitive(renkoOverlay);
+    candlestickSeries.attachPrimitive(new SessionDividerPrimitive(sessionOpenTimes, {
+      color: '#363636',
+      lineWidth: 2,
+    }));
 
     // Populate EMA Series
     const emaData = formattedData
@@ -452,6 +621,32 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       }
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+    chart.subscribeCrosshairMove((param) => {
+      if (!param?.time) return;
+      const barIndex = barIndexByChartTime.get(param.time);
+      if (Number.isInteger(barIndex)) crosshairBarIndexRef.current = barIndex;
+    });
+
+    const handleContextMenu = (event) => {
+      if (!chartContainerRef.current) return;
+
+      const rect = chartContainerRef.current.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const logicalIndex = chart.timeScale().coordinateToLogical(x);
+      const barIndex = logicalIndex === null ? -1 : Math.round(logicalIndex);
+      const clickedBrick = formattedData[barIndex];
+      if (!clickedBrick) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu({
+        x: event.clientX,
+        y: event.clientY,
+        brick: clickedBrick,
+      });
+    };
+
+    chartContainerRef.current.addEventListener('contextmenu', handleContextMenu, true);
 
     // Handle Clicks for Annotation Placement (only on the actual bar)
     chart.subscribeClick((param) => {
@@ -489,10 +684,34 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      chartContainerRef.current?.removeEventListener('contextmenu', handleContextMenu, true);
       chart.remove();
       markersPluginRef.current = null;
     };
   }, [data]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+
+    const closeMenu = () => setContextMenu(null);
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('contextmenu', closeMenu);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('contextmenu', closeMenu);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (Number.isInteger(bookmark?.barIndex)) {
+      goToBarIndex(bookmark.barIndex);
+    }
+  }, [bookmark, data]);
 
   // Synchronize Markers (Annotations) whenever annotations or data updates
   useEffect(() => {
@@ -500,8 +719,9 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
 
     // Recalculate formatted times mapping to map database ISO times back to chart unix times
     let lastTime = 0;
-    const timeMapping = {}; // ISO String -> Unix Timestamp
-    data.forEach(item => {
+    const formattedBars = [];
+    const timeMapping = {}; // ISO String -> Unix Timestamp (legacy fallback)
+    data.forEach((item, index) => {
       // Append 'Z' to treat the date as UTC and match the price series timestamps
       let t = Math.floor(Date.parse(item.time + 'Z') / 1000);
       if (isNaN(t)) {
@@ -512,13 +732,42 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
       }
       lastTime = t;
       timeMapping[item.time] = t;
+      formattedBars.push({
+        ...item,
+        originalIndex: index,
+        chartTime: t,
+      });
     });
+
+    const resolveAnnotationTime = (ann) => {
+      if (Number.isInteger(ann.barIndex) && formattedBars[ann.barIndex]) {
+        return formattedBars[ann.barIndex].chartTime;
+      }
+
+      const candidates = formattedBars.filter(bar => bar.time === ann.timestamp);
+      if (candidates.length === 0) return timeMapping[ann.timestamp];
+      if (!ann.metrics) return candidates[candidates.length - 1].chartTime;
+
+      const metricKeys = ['open', 'high', 'low', 'close', 'ema'];
+      const bestMatch = candidates.reduce((best, candidate) => {
+        const score = metricKeys.reduce((total, key) => {
+          const expected = ann.metrics[key];
+          const actual = candidate[key];
+          if (!Number.isFinite(expected) || !Number.isFinite(actual)) return total;
+          return total + Math.abs(actual - expected);
+        }, 0);
+
+        return !best || score < best.score ? { candidate, score } : best;
+      }, null);
+
+      return bestMatch?.candidate.chartTime;
+    };
 
     // Build Chart Markers
     const markers = [];
     if (annotations && annotations.length > 0) {
       annotations.forEach(ann => {
-        const chartTime = timeMapping[ann.timestamp];
+        const chartTime = resolveAnnotationTime(ann);
         if (chartTime) {
           if (ann.action === 'Buy') {
             markers.push({
@@ -526,7 +775,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
               position: 'belowBar',
               color: ann.isSystem ? '#1b5e20' : '#00e676', // Deep forest green for system, emerald for user
               shape: 'arrowUp',
-              text: ann.isSystem ? 'SYS BUY' : 'BUY',
+              text: ann.isSystem ? 'SYS BUY' : 'TEACH BUY',
             });
           } else if (ann.action === 'Sell') {
             markers.push({
@@ -534,7 +783,7 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
               position: 'aboveBar',
               color: ann.isSystem ? '#b71c1c' : '#ff1744', // Deep red for system, ruby for user
               shape: 'arrowDown',
-              text: ann.isSystem ? 'SYS SELL' : 'SELL',
+              text: ann.isSystem ? 'SYS SELL' : 'TEACH SELL',
             });
           } else if (ann.action === 'Skip') {
             markers.push({
@@ -542,14 +791,15 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
               position: 'aboveBar',
               color: '#ff9100', // Amber Orange
               shape: 'circle',
-              text: 'SKIP',
+              text: 'TEACH SKIP',
             });
           }
         }
       });
     }
 
-    console.log("SYNCING MARKERS: annotations=", annotations, "generated markers=", markers);
+    markers.sort((a, b) => a.time - b.time);
+
     if (!markersPluginRef.current) {
       markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, markers);
     } else {
@@ -560,6 +810,23 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
   return (
     <div className="chart-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div ref={chartContainerRef} style={{ flex: 1, minHeight: 0 }} />
+      {contextMenu && (
+        <div
+          className="chart-context-menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={event => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              onSetBookmark(contextMenu.brick);
+              setContextMenu(null);
+            }}
+          >
+            Bookmark This Bar
+          </button>
+        </div>
+      )}
       <div className="chart-controls">
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
           <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '40px' }}>Start</span>
@@ -575,6 +842,36 @@ export default function ChartComponent({ data, annotations, onBrickClick }) {
           <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '40px', textAlign: 'right' }}>End</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={handleGoToPreviousSession}
+            className="control-btn"
+            title="Go to the previous trading session open"
+          >
+            Previous Session
+          </button>
+          <button
+            onClick={handleGoToSessionOpen}
+            className="control-btn"
+            title="Go to the 06:30 open for the visible trading session"
+          >
+            Session Open 06:30
+          </button>
+          <button
+            onClick={handleGoToBookmark}
+            className="control-btn"
+            title={bookmark ? `Go to bookmark at ${bookmark.timestamp}` : 'No bookmark saved'}
+            disabled={!bookmark}
+          >
+            Go to Bookmark
+          </button>
+          <button
+            onClick={onClearBookmark}
+            className="control-btn"
+            title="Clear saved bookmark"
+            disabled={!bookmark}
+          >
+            Clear Bookmark
+          </button>
           <button onClick={handleGoToStart} className="control-btn" title="Go to Beginning">⏮ Go to Start</button>
           <button onClick={handleScrollLeft} className="control-btn" title="Scroll Left">◀ Scroll Left</button>
           <button onClick={handleZoomOut} className="control-btn" title="Zoom Out">➖ Zoom Out</button>

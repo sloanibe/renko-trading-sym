@@ -8,7 +8,7 @@ DEFAULT_CONFIG = {
     "ema_slope_period": 3,          # Number of bricks back to calculate EMA slope
     "ema_slope_threshold": 1.0,      # Minimum slope of the EMA (points change)
     "wick_retest_tolerance": 21.0,   # Max points the wick low/high can be from the EMA to be considered a 'touch'
-    "max_ema_pierce": 1.5,          # Max points a wick can pierce past the EMA before it is considered broken
+    "max_ema_pierce": 1.75,         # Max points a wick can pierce past the EMA before it is considered broken
     "min_wick_length": 5.0,         # Minimum length of the rejection wick (tail) in points
     "max_ema_distance": 60.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
     "target_points": 45.0,           # Profit target in points
@@ -34,11 +34,13 @@ def load_annotations(annotations_path, file_key):
 def run_strategy(data, config):
     trades = []
     signals = {} # timestamp -> "Buy" or "Sell"
+    signal_details = [] # Exact bar identity for charts with duplicate timestamps
+    signal_by_index = {}
     
     # Needs enough history to calculate EMA slope
     slope_period = config["ema_slope_period"]
     
-    for i in range(slope_period, len(data)):
+    for i in range(max(slope_period, 4), len(data)):
         current = data[i]
         prev = data[i - slope_period]
         
@@ -65,22 +67,37 @@ def run_strategy(data, config):
             if is_up_brick:
                 # Bottom Wick Length
                 wick_length = o - l
+                brick_size = abs(c - o)
+                required_wick_length = min(config["min_wick_length"], brick_size)
                 
                 # Proximity of close to EMA
                 body_dist = c - ema
                 
-                # Check if EMA is within the wick range, with tolerance
-                ema_below_top = ema <= o + config["wick_retest_tolerance"]
-                ema_above_bottom = ema >= l - config["wick_retest_tolerance"]
+                # Wicks may briefly test the EMA during a clean trend. Require
+                # the previous three brick bodies, rather than their full
+                # high/low ranges, to remain above the EMA.
+                prev_3_above = (
+                    min(data[i-1]["open"], data[i-1]["close"]) >= data[i-1]["ema"] and
+                    min(data[i-2]["open"], data[i-2]["close"]) >= data[i-2]["ema"] and
+                    min(data[i-3]["open"], data[i-3]["close"]) >= data[i-3]["ema"]
+                )
                 
-                # Filter out wicks that pierced way too deep (broken trend)
-                not_too_deep = (ema - l) <= config["max_ema_pierce"]
-                
-                if (wick_length >= config["min_wick_length"] and
+                # New Rules:
+                # - Tail goes back at least to the previous open (l <= prev_o)
+                # - Tail may pierce slightly below the EMA, within max_ema_pierce
+                # - Bars above the EMA for several consecutive bars (prev_3_above)
+                if (wick_length >= required_wick_length and
                     l <= prev_o and
-                    body_dist <= config["max_ema_distance"] and
-                    ema_below_top and ema_above_bottom and not_too_deep):
+                    l >= ema - config["max_ema_pierce"] and
+                    prev_3_above and
+                    body_dist <= config["max_ema_distance"]):
                     signals[current["time"]] = "Buy"
+                    signal_by_index[i] = "Buy"
+                    signal_details.append({
+                        "barIndex": i,
+                        "timestamp": current["time"],
+                        "action": "Buy",
+                    })
                     
         # 2. Check Bearish Setup (Short / Sell)
         # Trend Filter: EMA sloping downwards
@@ -89,26 +106,41 @@ def run_strategy(data, config):
             if is_down_brick:
                 # Top Wick Length
                 wick_length = h - o
+                brick_size = abs(c - o)
+                required_wick_length = min(config["min_wick_length"], brick_size)
                 
                 # Proximity of close to EMA
                 body_dist = ema - c
                 
-                # Check if EMA is within the wick range, with tolerance
-                ema_above_bottom = ema >= o - config["wick_retest_tolerance"]
-                ema_below_top = ema <= h + config["wick_retest_tolerance"]
+                # Wicks may briefly test the EMA during a clean trend. Require
+                # the previous three brick bodies, rather than their full
+                # high/low ranges, to remain below the EMA.
+                prev_3_below = (
+                    max(data[i-1]["open"], data[i-1]["close"]) <= data[i-1]["ema"] and
+                    max(data[i-2]["open"], data[i-2]["close"]) <= data[i-2]["ema"] and
+                    max(data[i-3]["open"], data[i-3]["close"]) <= data[i-3]["ema"]
+                )
                 
-                # Filter out wicks that pierced way too deep (broken trend)
-                not_too_deep = (h - ema) <= config["max_ema_pierce"]
-                
-                if (wick_length >= config["min_wick_length"] and
+                # New Rules:
+                # - Tail goes back at least to the previous open (h >= prev_o)
+                # - Tail may pierce slightly above the EMA, within max_ema_pierce
+                # - Bars below the EMA for several consecutive bars (prev_3_below)
+                if (wick_length >= required_wick_length and
                     h >= prev_o and
-                    body_dist <= config["max_ema_distance"] and
-                    ema_above_bottom and ema_below_top and not_too_deep):
+                    h <= ema + config["max_ema_pierce"] and
+                    prev_3_below and
+                    body_dist <= config["max_ema_distance"]):
                     signals[current["time"]] = "Sell"
+                    signal_by_index[i] = "Sell"
+                    signal_details.append({
+                        "barIndex": i,
+                        "timestamp": current["time"],
+                        "action": "Sell",
+                    })
 
     # Simulate basic trade outcomes (Target / Stop Loss)
     active_trade = None
-    for item in data:
+    for i, item in enumerate(data):
         t = item["time"]
         c = item["close"]
         
@@ -151,10 +183,10 @@ def run_strategy(data, config):
                     active_trade = None
         else:
             # Check entry
-            if t in signals:
+            if i in signal_by_index:
                 active_trade = {
                     "entry_time": t,
-                    "direction": signals[t],
+                    "direction": signal_by_index[i],
                     "entry_price": c,
                 }
                 
@@ -170,7 +202,7 @@ def run_strategy(data, config):
         active_trade["pnl_points"] = pnl
         trades.append(active_trade)
 
-    return signals, trades
+    return signals, signal_details, trades
 
 def analyze_alignment(signals, annotations, data):
     # Map raw data timestamp to bar details for easy retrieval
@@ -304,7 +336,7 @@ def run_optimization(data, annotations):
                     cfg["max_ema_distance"] = dist
                     cfg["wick_retest_tolerance"] = tol
                     
-                    signals, _ = run_strategy(data, cfg)
+                    signals, _, _ = run_strategy(data, cfg)
                     matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
                     
                     tp = len(matches)
@@ -374,12 +406,13 @@ if __name__ == "__main__":
             import sys
             sys.exit(0)
             
-        signals, trades = run_strategy(data, config)
+        signals, signal_details, trades = run_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         
         if args.json:
             result = {
                 "signals": signals,
+                "signal_details": signal_details,
                 "trades": trades,
                 "config": config,
                 "alignment": {

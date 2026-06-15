@@ -122,5 +122,83 @@
         "ema": 17632.2907
       }
     }
+  ],
+  "MNQ_15pt": [
+    {
+      "timestamp": "2026-06-12T06:31:28",
+      "barIndex": 109135,
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 29390.25,
+        "high": 29394,
+        "low": 29386.5,
+        "close": 29386.5,
+        "ema": 29396.8981
+      }
+    },
+    {
+      "timestamp": "2026-06-12T06:37:26",
+      "barIndex": 109403,
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 29412.75,
+        "high": 29418,
+        "low": 29409,
+        "close": 29409,
+        "ema": 29419.7391
+      }
+    },
+    {
+      "timestamp": "2026-06-12T06:46:36",
+      "barIndex": 110059,
+      "action": "Buy",
+      "comment": "",
+      "metrics": {
+        "open": 29281.5,
+        "high": 29285.25,
+        "low": 29275.25,
+        "close": 29285.25,
+        "ema": 29275.4691
+      }
+    },
+    {
+      "timestamp": "2026-06-12T07:03:55",
+      "barIndex": 110748,
+      "action": "Buy",
+      "comment": "",
+      "metrics": {
+        "open": 29480.25,
+        "high": 29484,
+        "low": 29473.75,
+        "close": 29484,
+        "ema": 29475.269
+      }
+    },
+    {
+      "timestamp": "2026-06-14T15:04:42",
+      "action": "Skip",
+      "comment": "This was generated as a bi but it does not have a long tail.",
+      "metrics": {
+        "open": 30012.75,
+        "high": 30016.5,
+        "low": 30012.5,
+        "close": 30016.5,
+        "ema": 30005.0052
+      }
+    },
+    {
+      "timestamp": "2026-06-14T15:05:07",
+      "action": "Buy",
+      "comment": "",
+      "metrics": {
+        "open": 30027.75,
+        "high": 30031.5,
+        "low": 30023.25,
+        "close": 30031.5,
+        "ema": 30018.9716
+      }
+    }
   ]
 }

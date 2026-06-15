@@ -2,6 +2,25 @@ import React, { useState, useEffect } from 'react';
 import ChartComponent from './ChartComponent';
 
 const API_BASE = 'http://localhost:5000/api';
+const bookmarkStorageKey = chartName => `renko-bookmark:${chartName}`;
+
+const metricsMatchBrick = (metrics, brick) => {
+  if (!metrics || !brick) return false;
+  return ['open', 'high', 'low', 'close', 'ema'].every(key => {
+    if (!Number.isFinite(metrics[key]) || !Number.isFinite(brick[key])) return true;
+    return Math.abs(metrics[key] - brick[key]) < 0.0001;
+  });
+};
+
+const annotationMatchesBrick = (annotation, brick) => {
+  if (!annotation || !brick) return false;
+  if (Number.isInteger(annotation.barIndex) && Number.isInteger(brick.originalIndex)) {
+    return annotation.barIndex === brick.originalIndex;
+  }
+
+  const targetTime = brick.originalTime || brick.time;
+  return annotation.timestamp === targetTime && metricsMatchBrick(annotation.metrics, brick);
+};
 
 export default function App() {
   const [charts, setCharts] = useState([]);
@@ -11,6 +30,8 @@ export default function App() {
   const [selectedBrick, setSelectedBrick] = useState(null);
   const [backtestResults, setBacktestResults] = useState(null);
   const [loadingBacktest, setLoadingBacktest] = useState(false);
+  const [discussionStatus, setDiscussionStatus] = useState('');
+  const [bookmark, setBookmark] = useState(null);
 
   // Strategy Configuration states
   const [slopeThreshold, setSlopeThreshold] = useState(2.0);
@@ -146,9 +167,16 @@ export default function App() {
     if (activeChart) {
       fetchChartData(activeChart);
       fetchBacktest(activeChart);
+      const savedBookmark = localStorage.getItem(bookmarkStorageKey(activeChart));
+      try {
+        setBookmark(savedBookmark ? JSON.parse(savedBookmark) : null);
+      } catch {
+        setBookmark(null);
+      }
     } else {
       setChartData([]);
       setBacktestResults(null);
+      setBookmark(null);
     }
   }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance, targetPoints, stopLossPoints]);
 
@@ -220,10 +248,74 @@ export default function App() {
   }, [modalOpen, selectedAction, commentText, selectedBrick, activeChart]);
 
   const handleBrickClick = (brick, clickPoint) => {
-    // Check if an annotation already exists for this brick's timestamp
+    // Match the exact brick; imported Renko data can contain duplicate timestamps.
     const activeAnnotations = allAnnotations[activeChart] || [];
     const targetTime = brick.originalTime || brick.time;
-    const existing = activeAnnotations.find(a => a.timestamp === targetTime || a.timestamp === brick.time);
+    const existing = activeAnnotations.find(annotation => annotationMatchesBrick(annotation, brick));
+    const barIndex = brick.originalIndex;
+    const exactSystemSignal = backtestResults?.signal_details?.find(
+      signal => signal.barIndex === barIndex
+    );
+    const systemSignal = exactSystemSignal?.action || null;
+
+    if (Number.isInteger(barIndex)) {
+      const contextStart = Math.max(0, barIndex - 12);
+      const contextEnd = Math.min(chartData.length, barIndex + 13);
+      const context = chartData.slice(contextStart, contextEnd).map((bar, offset) => ({
+        barIndex: contextStart + offset,
+        relativePosition: contextStart + offset - barIndex,
+        ...bar,
+      }));
+      const previousBar = chartData[barIndex - 1];
+      const emaThreeBarsAgo = chartData[barIndex - 3]?.ema;
+      const isUpBrick = brick.close > brick.open;
+      const wickLength = isUpBrick ? brick.open - brick.low : brick.high - brick.open;
+
+      setDiscussionStatus('Publishing selected setup...');
+      fetch(`${API_BASE}/ai-selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chart: activeChart,
+          selectedAt: new Date().toISOString(),
+          selectedBar: {
+            barIndex,
+            timestamp: targetTime,
+            direction: isUpBrick ? 'Up' : 'Down',
+            systemSignal,
+            annotation: existing || null,
+            values: {
+              open: brick.open,
+              high: brick.high,
+              low: brick.low,
+              close: brick.close,
+              ema: brick.ema,
+            },
+            measurements: {
+              bodySize: Math.abs(brick.close - brick.open),
+              wickLength,
+              closeToEma: Number.isFinite(brick.ema) ? brick.close - brick.ema : null,
+              emaSlopeThreeBars: Number.isFinite(emaThreeBarsAgo)
+                ? brick.ema - emaThreeBarsAgo
+                : null,
+              previousOpen: previousBar?.open ?? null,
+              wickReachesPreviousOpen: previousBar
+                ? (isUpBrick ? brick.low <= previousBar.open : brick.high >= previousBar.open)
+                : null,
+            },
+          },
+          context,
+        }),
+      })
+        .then(response => {
+          if (!response.ok) throw new Error(`Selection server returned ${response.status}`);
+          setDiscussionStatus('Ready. Tell Codex: analyze my selected setup.');
+        })
+        .catch(error => {
+          console.error('Failed to publish selected setup:', error);
+          setDiscussionStatus('Could not publish selection. Check the API server.');
+        });
+    }
     
     setSelectedBrick(brick);
     if (existing) {
@@ -232,7 +324,9 @@ export default function App() {
       setIsEditing(true);
     } else {
       // Check if there is a system signal for this brick
-      const sysSignal = backtestResults?.signals?.[targetTime] || backtestResults?.signals?.[brick.time];
+      const sysSignal = backtestResults?.signal_details?.find(
+        signal => signal.barIndex === brick.originalIndex
+      )?.action;
       if (sysSignal) {
         setSelectedAction(sysSignal);
         setCommentText('Approving system signal');
@@ -284,6 +378,7 @@ export default function App() {
     
     const newAnnotation = {
       timestamp: targetTime,
+      barIndex: selectedBrick.originalIndex,
       action: selectedAction,
       comment: commentText,
       metrics: {
@@ -295,7 +390,7 @@ export default function App() {
       }
     };
 
-    const index = activeAnnotations.findIndex(a => a.timestamp === targetTime || a.timestamp === selectedBrick.time);
+    const index = activeAnnotations.findIndex(annotation => annotationMatchesBrick(annotation, selectedBrick));
     if (index !== -1) {
       // Update existing
       activeAnnotations[index] = newAnnotation;
@@ -314,25 +409,27 @@ export default function App() {
 
     // Persist to disk via Node Express server
     try {
-      await fetch(`${API_BASE}/annotations`, {
+      const response = await fetch(`${API_BASE}/annotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileKey: activeChart, annotations: activeAnnotations }),
       });
-      // Re-run backtester after annotations are updated on disk
-      fetchBacktest(activeChart);
+      if (!response.ok) {
+        const details = await response.json().catch(() => ({}));
+        throw new Error(details.error || `Annotation server returned ${response.status}`);
+      }
     } catch (err) {
       console.error('Failed to save annotation:', err);
-      alert('Failed to persist annotation to disk');
+      setAllAnnotations(allAnnotations);
+      alert('Failed to save annotation. Make sure the API server is running on port 5000.');
     }
   };
 
   const handleDeleteAnnotation = async () => {
     if (!selectedBrick) return;
 
-    const targetTime = selectedBrick.originalTime || selectedBrick.time;
     const activeAnnotations = (allAnnotations[activeChart] || []).filter(
-      a => a.timestamp !== targetTime && a.timestamp !== selectedBrick.time
+      annotation => !annotationMatchesBrick(annotation, selectedBrick)
     );
 
     // Optimistically update UI
@@ -341,17 +438,41 @@ export default function App() {
     setModalOpen(false);
 
     try {
-      await fetch(`${API_BASE}/annotations`, {
+      const response = await fetch(`${API_BASE}/annotations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ fileKey: activeChart, annotations: activeAnnotations }),
       });
-      // Re-run backtester after annotations are updated on disk
-      fetchBacktest(activeChart);
+      if (!response.ok) {
+        const details = await response.json().catch(() => ({}));
+        throw new Error(details.error || `Annotation server returned ${response.status}`);
+      }
     } catch (err) {
       console.error('Failed to delete annotation:', err);
-      alert('Failed to delete annotation on disk');
+      setAllAnnotations(allAnnotations);
+      alert('Failed to delete annotation. Make sure the API server is running on port 5000.');
     }
+  };
+
+  const handleBookmarkBrick = (brick) => {
+    if (!brick || !Number.isInteger(brick.originalIndex) || !activeChart) return;
+
+    const nextBookmark = {
+      barIndex: brick.originalIndex,
+      timestamp: brick.originalTime || brick.time,
+    };
+    localStorage.setItem(bookmarkStorageKey(activeChart), JSON.stringify(nextBookmark));
+    setBookmark(nextBookmark);
+  };
+
+  const handleSetBookmark = () => {
+    handleBookmarkBrick(selectedBrick);
+  };
+
+  const handleClearBookmark = () => {
+    if (!activeChart) return;
+    localStorage.removeItem(bookmarkStorageKey(activeChart));
+    setBookmark(null);
   };
 
   const savedAnnotations = allAnnotations[activeChart] || [];
@@ -364,6 +485,7 @@ export default function App() {
 
     const previewAnn = {
       timestamp: selectedBrick.originalTime || selectedBrick.time,
+      barIndex: selectedBrick.originalIndex,
       action: selectedAction,
       comment: commentText,
       metrics: {
@@ -376,11 +498,12 @@ export default function App() {
       isPreview: true,
     };
 
-    const targetTime = selectedBrick.originalTime || selectedBrick.time;
-    const exists = savedAnnotations.some(a => a.timestamp === targetTime);
+    const exists = savedAnnotations.some(annotation => annotationMatchesBrick(annotation, selectedBrick));
 
     if (exists) {
-      return savedAnnotations.map(a => a.timestamp === targetTime ? previewAnn : a);
+      return savedAnnotations.map(annotation =>
+        annotationMatchesBrick(annotation, selectedBrick) ? previewAnn : annotation
+      );
     } else {
       return [...savedAnnotations, previewAnn];
     }
@@ -389,17 +512,15 @@ export default function App() {
   // Merge system signals with user annotations for chart display
   const mergedAnnotations = React.useMemo(() => {
     const merged = [...currentAnnotations];
-    if (backtestResults && backtestResults.signals) {
-      Object.entries(backtestResults.signals).forEach(([timestamp, action]) => {
-        const hasUserAnn = currentAnnotations.some(a => a.timestamp === timestamp);
-        if (!hasUserAnn) {
-          merged.push({
-            timestamp,
-            action,
-            isSystem: true,
-            comment: 'System generated entry',
-          });
-        }
+    if (backtestResults?.signal_details) {
+      backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          comment: 'System generated entry',
+        });
       });
     }
     return merged;
@@ -712,6 +833,9 @@ export default function App() {
                 data={chartData}
                 annotations={mergedAnnotations}
                 onBrickClick={handleBrickClick}
+                bookmark={bookmark}
+                onSetBookmark={handleBookmarkBrick}
+                onClearBookmark={handleClearBookmark}
               />
             </>
           ) : (
@@ -758,8 +882,17 @@ export default function App() {
                       style={{ cursor: 'pointer' }}
                       onClick={() => {
                         // Find matching brick in chartData
-                        const brick = chartData.find(d => d.time === ann.timestamp);
-                        if (brick) handleBrickClick(brick);
+                        const indexedBrick = Number.isInteger(ann.barIndex) ? chartData[ann.barIndex] : null;
+                        const brick = indexedBrick || chartData.find(d =>
+                          d.time === ann.timestamp && metricsMatchBrick(ann.metrics, d)
+                        );
+                        if (brick) {
+                          handleBrickClick({
+                            ...brick,
+                            originalTime: brick.time,
+                            originalIndex: ann.barIndex ?? chartData.indexOf(brick),
+                          });
+                        }
                       }}
                     >
                       <td style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
@@ -843,7 +976,22 @@ export default function App() {
             </div>
             
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Timestamp: <span style={{ fontFamily: 'monospace' }}>{selectedBrick.time}</span>
+              MultiCharts timestamp:{' '}
+              <span style={{ fontFamily: 'monospace' }}>
+                {selectedBrick.originalTime || selectedBrick.time}
+              </span>
+            </div>
+            <div
+              style={{
+                fontSize: '11px',
+                color: discussionStatus.startsWith('Could not') ? 'var(--color-sell)' : 'var(--primary)',
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                padding: '7px 9px',
+              }}
+            >
+              AI discussion: {discussionStatus || 'Select a brick to publish its context.'}
             </div>
 
             <div className="bar-stats-grid">
@@ -915,6 +1063,12 @@ export default function App() {
                   Delete
                 </button>
               )}
+              <button
+                className="btn btn-secondary"
+                onClick={handleSetBookmark}
+              >
+                {bookmark?.barIndex === selectedBrick.originalIndex ? 'Bookmarked' : 'Bookmark This Bar'}
+              </button>
               <button
                 className="btn btn-secondary"
                 onClick={() => setModalOpen(false)}

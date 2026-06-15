@@ -103,7 +103,7 @@ The following parameters have been iteratively tuned using the AI feedback loop 
 | `EMAPeriod` | Lookback for Exponential Moving Average | 8 | **8** |
 | `ema_slope_threshold` | Min change in EMA price over 3 bricks | 2.0 pts | **1.0 pt** (High Momentum Trend) |
 | `wick_retest_tolerance`| Max distance from wick extreme to EMA for a "touch" | 2.0 pts | **21.0 pts** (Fast trend trailing) |
-| `max_ema_pierce` | Max distance price can overshoot EMA | 1.5 pts | **1.5 pts** |
+| `max_ema_pierce` | Max distance price can overshoot EMA | 1.5 pts | **1.75 pts** |
 | `min_wick_length` | Min tail length required to show strong rejection | 5.0 pts | **5.0 pts** |
 | `max_ema_distance` | Max distance from brick close to EMA (over-extension) | 20.0 pts | **60.0 pts** (Lagging EMA clearance) |
 | `congestion_lookback` | Lookback for chop/overlap checks | 6 bricks | **6 bricks** |

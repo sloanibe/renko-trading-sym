@@ -24,13 +24,14 @@ if (!fs.existsSync(DATA_DIR)) {
 }
 
 const ANNOTATIONS_PATH = path.join(DATA_DIR, 'annotations.json');
+const AI_SELECTION_PATH = path.join(DATA_DIR, 'ai_selection.json');
 
 // Endpoint: List all chart files (excluding annotations.json)
 app.get('/api/charts', (req, res) => {
   try {
     const files = fs.readdirSync(DATA_DIR);
     const chartFiles = files
-      .filter(f => f.endsWith('.json') && f !== 'annotations.json')
+      .filter(f => f.endsWith('.json') && !['annotations.json', 'ai_selection.json'].includes(f))
       .map(f => f.replace('.json', ''));
     res.json(chartFiles);
   } catch (error) {
@@ -90,6 +91,34 @@ app.post('/api/annotations', (req, res) => {
   }
 });
 
+// Endpoint: Publish the exact chart setup currently selected for AI discussion
+app.post('/api/ai-selection', (req, res) => {
+  try {
+    const selection = req.body;
+    if (!selection?.chart || !Number.isInteger(selection?.selectedBar?.barIndex)) {
+      return res.status(400).json({ error: 'Selection must include a chart and bar index' });
+    }
+
+    const tempPath = `${AI_SELECTION_PATH}.tmp`;
+    fs.writeFileSync(tempPath, JSON.stringify(selection, null, 2), 'utf-8');
+    fs.renameSync(tempPath, AI_SELECTION_PATH);
+    res.json({ success: true, path: AI_SELECTION_PATH });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to publish AI selection', details: error.message });
+  }
+});
+
+app.get('/api/ai-selection', (req, res) => {
+  try {
+    if (!fs.existsSync(AI_SELECTION_PATH)) {
+      return res.status(404).json({ error: 'No chart setup has been selected yet' });
+    }
+    res.json(JSON.parse(fs.readFileSync(AI_SELECTION_PATH, 'utf-8')));
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to read AI selection', details: error.message });
+  }
+});
+
 // Endpoint: Get backtester results
 app.get('/api/charts/:name/backtest', (req, res) => {
   try {
@@ -118,7 +147,7 @@ app.get('/api/charts/:name/backtest', (req, res) => {
       cmd += ` --stop ${parseFloat(req.query.stop)}`;
     }
     
-    exec(cmd, (error, stdout, stderr) => {
+    exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         console.error('Backtester error:', error, stderr);
         return res.status(500).json({ error: 'Failed to run backtester', details: stderr || error.message });
@@ -143,7 +172,7 @@ app.get('/api/charts/:name/optimize', (req, res) => {
     const pythonScript = path.join(__dirname, '..', 'backend', 'backtester.py');
     const cmd = `python3 "${pythonScript}" --chart "${chartName}" --optimize`;
     
-    exec(cmd, (error, stdout, stderr) => {
+    exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         console.error('Optimizer error:', error, stderr);
         return res.status(500).json({ error: 'Failed to run optimizer', details: stderr || error.message });
