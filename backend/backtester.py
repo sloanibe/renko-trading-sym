@@ -13,7 +13,6 @@ DEFAULT_CONFIG = {
     "max_ema_distance": 60.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
     "tick_size": 0.25,               # MNQ minimum price increment
     "tail_break_ticks": 2,           # Failure after price exceeds the signal tail by this many ticks
-    "ema50_slope_threshold": 0.25,   # Minimum slope of the 50 EMA (points change)
     "cooldown_bars": 0,             # Minimum number of bars to wait between signals (0 to disable)
 }
 
@@ -39,13 +38,7 @@ def run_strategy(data, config):
     signal_details = [] # Exact bar identity for charts with duplicate timestamps
     signal_by_index = {}
     
-    # Calculate 50 EMA
-    if len(data) > 0:
-        alpha_50 = 2.0 / (50.0 + 1.0)
-        current_ema50 = data[0]["close"]
-        data[0]["ema50"] = current_ema50
-        for idx in range(1, len(data)):
-            data[idx]["ema50"] = data[idx]["close"] * alpha_50 + data[idx - 1]["ema50"] * (1.0 - alpha_50)
+    # (EMA 50 calculation removed)
 
     # Needs enough history to calculate EMA slope
     slope_period = config["ema_slope_period"]
@@ -54,19 +47,14 @@ def run_strategy(data, config):
         current = data[i]
         prev = data[i - slope_period]
         
-        # Prices & Indicators
         o, h, l, c = current["open"], current["high"], current["low"], current["close"]
         ema = current["ema"]
         prev_ema = prev["ema"]
         
-        ema50 = current["ema50"]
-        prev_ema50 = prev["ema50"]
-        
-        if ema is None or prev_ema is None or ema50 is None or prev_ema50 is None:
+        if ema is None or prev_ema is None:
             continue
             
         ema_slope = ema - prev_ema
-        ema50_slope = ema50 - prev_ema50
         is_up_brick = c > o
         is_down_brick = c < o
         
@@ -77,13 +65,10 @@ def run_strategy(data, config):
             
         # Immediate previous bar to check wick extensions
         prev_bar = data[i - 1]
-        prev_o = prev_bar["open"]
+        prev_midpoint = (prev_bar["open"] + prev_bar["close"]) / 2.0
         
-        # 1. Check Bullish Setup (Long / Buy)
-        # Trend Filter: 8 EMA sloping upwards, 50 EMA sloping upwards, and 8 EMA above 50 EMA
-        if (ema_slope >= config["ema_slope_threshold"] and
-            ema50_slope >= config.get("ema50_slope_threshold", 0.25) and
-            ema > ema50):
+        # Trend Filter: 8 EMA sloping upwards
+        if ema_slope >= config["ema_slope_threshold"]:
             # Trigger: completed Blue (up) brick
             if is_up_brick:
                 # Bottom Wick Length
@@ -104,11 +89,11 @@ def run_strategy(data, config):
                 )
                 
                 # New Rules:
-                # - Tail goes back at least to the previous open (l <= prev_o)
+                # - Tail goes back at least to half of the previous bar's body (l <= prev_midpoint)
                 # - Tail may pierce slightly below the EMA, within max_ema_pierce
                 # - Bars above the EMA for several consecutive bars (prev_3_above)
                 if (wick_length >= required_wick_length and
-                    l <= prev_o and
+                    l <= prev_midpoint and
                     l >= ema - config["max_ema_pierce"] and
                     prev_3_above and
                     body_dist <= config["max_ema_distance"]):
@@ -122,10 +107,8 @@ def run_strategy(data, config):
                     })
                     
         # 2. Check Bearish Setup (Short / Sell)
-        # Trend Filter: 8 EMA sloping downwards, 50 EMA sloping downwards, and 8 EMA below 50 EMA
-        elif (ema_slope <= -config["ema_slope_threshold"] and
-              ema50_slope <= -config.get("ema50_slope_threshold", 0.25) and
-              ema < ema50):
+        # Trend Filter: 8 EMA sloping downwards
+        elif ema_slope <= -config["ema_slope_threshold"]:
             # Trigger: completed Red (down) brick
             if is_down_brick:
                 # Top Wick Length
@@ -146,11 +129,11 @@ def run_strategy(data, config):
                 )
                 
                 # New Rules:
-                # - Tail goes back at least to the previous open (h >= prev_o)
+                # - Tail goes back at least to half of the previous bar's body (h >= prev_midpoint)
                 # - Tail may pierce slightly above the EMA, within max_ema_pierce
                 # - Bars below the EMA for several consecutive bars (prev_3_below)
                 if (wick_length >= required_wick_length and
-                    h >= prev_o and
+                    h >= prev_midpoint and
                     h <= ema + config["max_ema_pierce"] and
                     prev_3_below and
                     body_dist <= config["max_ema_distance"]):
@@ -751,7 +734,6 @@ if __name__ == "__main__":
     parser.add_argument("--min-wick", type=float, help="Override minimum wick length")
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
     parser.add_argument("--cooldown-bars", type=int, help="Override time cool-down in bars")
-    parser.add_argument("--ema50-slope", type=float, help="Override 50 EMA slope threshold")
     parser.add_argument("--exit-strategy", choices=["fixed", "trail", "stepup"], default="fixed", help="Exit strategy for daily campaign ('fixed' target, 'trail' to opposite brick, or 'stepup' on loss)")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
@@ -770,8 +752,6 @@ if __name__ == "__main__":
         config["max_ema_distance"] = args.max_ema_dist
     if args.cooldown_bars is not None:
         config["cooldown_bars"] = args.cooldown_bars
-    if args.ema50_slope is not None:
-        config["ema50_slope_threshold"] = args.ema50_slope
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")

@@ -457,17 +457,7 @@ export default function ChartComponent({
       };
     });
 
-    // Calculate 50 EMA
-    const alpha50 = 2.0 / (50.0 + 1.0);
-    let currentEma50 = formattedData.length > 0 ? formattedData[0].close : null;
-    formattedData.forEach((item, index) => {
-      if (index === 0) {
-        item.ema50 = currentEma50;
-      } else {
-        currentEma50 = item.close * alpha50 + currentEma50 * (1.0 - alpha50);
-        item.ema50 = currentEma50;
-      }
-    });
+    // (50 EMA calculation removed)
 
     const getOriginalDate = (chartTime) => {
       const originalTime = originalTimeByChartTime.get(chartTime);
@@ -574,12 +564,7 @@ export default function ChartComponent({
     });
     emaSeriesRef.current = emaSeries;
 
-    // Add Line Series (for the 50 EMA)
-    const ema50Series = chart.addSeries(LineSeries, {
-      color: '#4f46e5',         // Indigo for 50 EMA
-      lineWidth: 2,
-      priceLineVisible: false,  // Hide horizontal current price line for 50 EMA
-    });
+    // (50 EMA series declaration removed)
 
     // Populate Candlestick Series
     const candleData = formattedData.map(d => ({
@@ -615,14 +600,7 @@ export default function ChartComponent({
       }));
     emaSeries.setData(emaData);
 
-    // Populate 50 EMA Series
-    const ema50Data = formattedData
-      .filter(d => d.ema50 !== undefined && d.ema50 !== null)
-      .map(d => ({
-        time: d.time,
-        value: d.ema50,
-      }));
-    ema50Series.setData(ema50Data);
+    // (50 EMA data binding removed)
 
     // Set initial visible range (show last 150 bars to be zoomed in and readable)
     const totalBars = formattedData.length;
