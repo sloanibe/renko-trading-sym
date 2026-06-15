@@ -457,15 +457,15 @@ export default function ChartComponent({
       };
     });
 
-    // Calculate 24 EMA
-    const alpha24 = 2.0 / (24.0 + 1.0);
-    let currentEma24 = formattedData.length > 0 ? formattedData[0].close : null;
+    // Calculate 50 EMA
+    const alpha50 = 2.0 / (50.0 + 1.0);
+    let currentEma50 = formattedData.length > 0 ? formattedData[0].close : null;
     formattedData.forEach((item, index) => {
       if (index === 0) {
-        item.ema24 = currentEma24;
+        item.ema50 = currentEma50;
       } else {
-        currentEma24 = item.close * alpha24 + currentEma24 * (1.0 - alpha24);
-        item.ema24 = currentEma24;
+        currentEma50 = item.close * alpha50 + currentEma50 * (1.0 - alpha50);
+        item.ema50 = currentEma50;
       }
     });
 
@@ -574,11 +574,11 @@ export default function ChartComponent({
     });
     emaSeriesRef.current = emaSeries;
 
-    // Add Line Series (for the 24 EMA)
-    const ema24Series = chart.addSeries(LineSeries, {
-      color: '#4f46e5',         // Indigo for 24 EMA
+    // Add Line Series (for the 50 EMA)
+    const ema50Series = chart.addSeries(LineSeries, {
+      color: '#4f46e5',         // Indigo for 50 EMA
       lineWidth: 2,
-      priceLineVisible: false,  // Hide horizontal current price line for 24 EMA
+      priceLineVisible: false,  // Hide horizontal current price line for 50 EMA
     });
 
     // Populate Candlestick Series
@@ -615,14 +615,14 @@ export default function ChartComponent({
       }));
     emaSeries.setData(emaData);
 
-    // Populate 24 EMA Series
-    const ema24Data = formattedData
-      .filter(d => d.ema24 !== undefined && d.ema24 !== null)
+    // Populate 50 EMA Series
+    const ema50Data = formattedData
+      .filter(d => d.ema50 !== undefined && d.ema50 !== null)
       .map(d => ({
         time: d.time,
-        value: d.ema24,
+        value: d.ema50,
       }));
-    ema24Series.setData(ema24Data);
+    ema50Series.setData(ema50Data);
 
     // Set initial visible range (show last 150 bars to be zoomed in and readable)
     const totalBars = formattedData.length;

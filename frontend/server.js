@@ -140,8 +140,8 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.maxEmaDist) {
       cmd += ` --max-ema-dist ${parseFloat(req.query.maxEmaDist)}`;
     }
-    if (req.query.ema24Slope) {
-      cmd += ` --ema24-slope ${parseFloat(req.query.ema24Slope)}`;
+    if (req.query.ema50Slope) {
+      cmd += ` --ema50-slope ${parseFloat(req.query.ema50Slope)}`;
     }
     if (req.query.cooldownBars !== undefined) {
       cmd += ` --cooldown-bars ${parseInt(req.query.cooldownBars, 10)}`;

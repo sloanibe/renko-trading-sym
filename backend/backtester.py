@@ -13,7 +13,7 @@ DEFAULT_CONFIG = {
     "max_ema_distance": 60.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
     "tick_size": 0.25,               # MNQ minimum price increment
     "tail_break_ticks": 2,           # Failure after price exceeds the signal tail by this many ticks
-    "ema24_slope_threshold": 0.25,   # Minimum slope of the 24 EMA (points change)
+    "ema50_slope_threshold": 0.25,   # Minimum slope of the 50 EMA (points change)
     "cooldown_bars": 0,             # Minimum number of bars to wait between signals (0 to disable)
 }
 
@@ -39,13 +39,13 @@ def run_strategy(data, config):
     signal_details = [] # Exact bar identity for charts with duplicate timestamps
     signal_by_index = {}
     
-    # Calculate 24 EMA
+    # Calculate 50 EMA
     if len(data) > 0:
-        alpha_24 = 2.0 / (24.0 + 1.0)
-        current_ema24 = data[0]["close"]
-        data[0]["ema24"] = current_ema24
+        alpha_50 = 2.0 / (50.0 + 1.0)
+        current_ema50 = data[0]["close"]
+        data[0]["ema50"] = current_ema50
         for idx in range(1, len(data)):
-            data[idx]["ema24"] = data[idx]["close"] * alpha_24 + data[idx - 1]["ema24"] * (1.0 - alpha_24)
+            data[idx]["ema50"] = data[idx]["close"] * alpha_50 + data[idx - 1]["ema50"] * (1.0 - alpha_50)
 
     # Needs enough history to calculate EMA slope
     slope_period = config["ema_slope_period"]
@@ -59,14 +59,14 @@ def run_strategy(data, config):
         ema = current["ema"]
         prev_ema = prev["ema"]
         
-        ema24 = current["ema24"]
-        prev_ema24 = prev["ema24"]
+        ema50 = current["ema50"]
+        prev_ema50 = prev["ema50"]
         
-        if ema is None or prev_ema is None or ema24 is None or prev_ema24 is None:
+        if ema is None or prev_ema is None or ema50 is None or prev_ema50 is None:
             continue
             
         ema_slope = ema - prev_ema
-        ema24_slope = ema24 - prev_ema24
+        ema50_slope = ema50 - prev_ema50
         is_up_brick = c > o
         is_down_brick = c < o
         
@@ -80,10 +80,10 @@ def run_strategy(data, config):
         prev_o = prev_bar["open"]
         
         # 1. Check Bullish Setup (Long / Buy)
-        # Trend Filter: 8 EMA sloping upwards, 24 EMA sloping upwards, and 8 EMA above 24 EMA
+        # Trend Filter: 8 EMA sloping upwards, 50 EMA sloping upwards, and 8 EMA above 50 EMA
         if (ema_slope >= config["ema_slope_threshold"] and
-            ema24_slope >= config.get("ema24_slope_threshold", 0.25) and
-            ema > ema24):
+            ema50_slope >= config.get("ema50_slope_threshold", 0.25) and
+            ema > ema50):
             # Trigger: completed Blue (up) brick
             if is_up_brick:
                 # Bottom Wick Length
@@ -122,10 +122,10 @@ def run_strategy(data, config):
                     })
                     
         # 2. Check Bearish Setup (Short / Sell)
-        # Trend Filter: 8 EMA sloping downwards, 24 EMA sloping downwards, and 8 EMA below 24 EMA
+        # Trend Filter: 8 EMA sloping downwards, 50 EMA sloping downwards, and 8 EMA below 50 EMA
         elif (ema_slope <= -config["ema_slope_threshold"] and
-              ema24_slope <= -config.get("ema24_slope_threshold", 0.25) and
-              ema < ema24):
+              ema50_slope <= -config.get("ema50_slope_threshold", 0.25) and
+              ema < ema50):
             # Trigger: completed Red (down) brick
             if is_down_brick:
                 # Top Wick Length
@@ -751,7 +751,7 @@ if __name__ == "__main__":
     parser.add_argument("--min-wick", type=float, help="Override minimum wick length")
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
     parser.add_argument("--cooldown-bars", type=int, help="Override time cool-down in bars")
-    parser.add_argument("--ema24-slope", type=float, help="Override 24 EMA slope threshold")
+    parser.add_argument("--ema50-slope", type=float, help="Override 50 EMA slope threshold")
     parser.add_argument("--exit-strategy", choices=["fixed", "trail", "stepup"], default="fixed", help="Exit strategy for daily campaign ('fixed' target, 'trail' to opposite brick, or 'stepup' on loss)")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
@@ -770,8 +770,8 @@ if __name__ == "__main__":
         config["max_ema_distance"] = args.max_ema_dist
     if args.cooldown_bars is not None:
         config["cooldown_bars"] = args.cooldown_bars
-    if args.ema24_slope is not None:
-        config["ema24_slope_threshold"] = args.ema24_slope
+    if args.ema50_slope is not None:
+        config["ema50_slope_threshold"] = args.ema50_slope
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")
