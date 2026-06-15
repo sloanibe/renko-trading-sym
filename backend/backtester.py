@@ -11,8 +11,8 @@ DEFAULT_CONFIG = {
     "max_ema_pierce": 1.75,         # Max points a wick can pierce past the EMA before it is considered broken
     "min_wick_length": 5.0,         # Minimum length of the rejection wick (tail) in points
     "max_ema_distance": 60.0,       # Maximum distance of brick close from EMA (prevents over-extended chase entries)
-    "target_points": 45.0,           # Profit target in points
-    "stop_loss_points": 15.0,        # Stop loss in points
+    "tick_size": 0.25,               # MNQ minimum price increment
+    "tail_break_ticks": 2,           # Failure after price exceeds the signal tail by this many ticks
 }
 
 def load_json_data(file_path):
@@ -138,69 +138,64 @@ def run_strategy(data, config):
                         "action": "Sell",
                     })
 
-    # Simulate basic trade outcomes (Target / Stop Loss)
-    active_trade = None
-    for i, item in enumerate(data):
-        t = item["time"]
-        c = item["close"]
-        
-        if active_trade:
-            # Check exit
-            entry_price = active_trade["entry_price"]
-            direction = active_trade["direction"]
-            
-            if direction == "Buy":
-                pnl = c - entry_price
-                if pnl >= config["target_points"]:
-                    active_trade["exit_price"] = entry_price + config["target_points"]
-                    active_trade["exit_time"] = t
-                    active_trade["result"] = "Win"
-                    active_trade["pnl_points"] = config["target_points"]
-                    trades.append(active_trade)
-                    active_trade = None
-                elif pnl <= -config["stop_loss_points"]:
-                    active_trade["exit_price"] = entry_price - config["stop_loss_points"]
-                    active_trade["exit_time"] = t
-                    active_trade["result"] = "Loss"
-                    active_trade["pnl_points"] = -config["stop_loss_points"]
-                    trades.append(active_trade)
-                    active_trade = None
-            elif direction == "Sell":
-                pnl = entry_price - c
-                if pnl >= config["target_points"]:
-                    active_trade["exit_price"] = entry_price - config["target_points"]
-                    active_trade["exit_time"] = t
-                    active_trade["result"] = "Win"
-                    active_trade["pnl_points"] = config["target_points"]
-                    trades.append(active_trade)
-                    active_trade = None
-                elif pnl <= -config["stop_loss_points"]:
-                    active_trade["exit_price"] = entry_price + config["stop_loss_points"]
-                    active_trade["exit_time"] = t
-                    active_trade["result"] = "Loss"
-                    active_trade["pnl_points"] = -config["stop_loss_points"]
-                    trades.append(active_trade)
-                    active_trade = None
+    # Evaluate every signal independently: one favorable brick must complete
+    # before price exceeds the signal bar's tail by two ticks.
+    tail_break_distance = config["tick_size"] * config["tail_break_ticks"]
+    for signal in signal_details:
+        i = signal["barIndex"]
+        signal_bar = data[i]
+        direction = signal["action"]
+        entry_price = signal_bar["close"]
+        brick_size = abs(signal_bar["close"] - signal_bar["open"])
+
+        evaluation = {
+            "entry_time": signal_bar["time"],
+            "barIndex": i,
+            "direction": direction,
+            "entry_price": entry_price,
+            "brick_size": brick_size,
+            "tail_break_distance": tail_break_distance,
+            "result": "Pending",
+        }
+
+        if direction == "Buy":
+            evaluation["success_price"] = entry_price + brick_size
+            evaluation["failure_price"] = signal_bar["low"] - tail_break_distance
         else:
-            # Check entry
-            if i in signal_by_index:
-                active_trade = {
-                    "entry_time": t,
-                    "direction": signal_by_index[i],
-                    "entry_price": c,
-                }
-                
-    # If a trade is still open at the end, close it at market price
-    if active_trade and len(data) > 0:
-        last_close = data[-1]["close"]
-        entry_price = active_trade["entry_price"]
-        direction = active_trade["direction"]
-        pnl = (last_close - entry_price) if direction == "Buy" else (entry_price - last_close)
-        active_trade["exit_price"] = last_close
-        active_trade["exit_time"] = data[-1]["time"]
-        active_trade["result"] = "Win" if pnl >= 0 else "Loss"
-        active_trade["pnl_points"] = pnl
-        trades.append(active_trade)
+            evaluation["success_price"] = entry_price - brick_size
+            evaluation["failure_price"] = signal_bar["high"] + tail_break_distance
+
+        for j in range(i + 1, len(data)):
+            future = data[j]
+            if direction == "Buy":
+                failed = future["low"] <= evaluation["failure_price"]
+                succeeded = (
+                    future["close"] > future["open"] and
+                    future["close"] >= evaluation["success_price"]
+                )
+            else:
+                failed = future["high"] >= evaluation["failure_price"]
+                succeeded = (
+                    future["close"] < future["open"] and
+                    future["close"] <= evaluation["success_price"]
+                )
+
+            # OHLC data cannot establish intrabar ordering. If both thresholds
+            # occur in one bar, count the tail break first conservatively.
+            if failed:
+                evaluation["result"] = "Fail"
+                evaluation["outcome_reason"] = "Tail broken by two ticks"
+                evaluation["outcome_time"] = future["time"]
+                evaluation["outcome_barIndex"] = j
+                break
+            if succeeded:
+                evaluation["result"] = "Pass"
+                evaluation["outcome_reason"] = "One favorable brick completed"
+                evaluation["outcome_time"] = future["time"]
+                evaluation["outcome_barIndex"] = j
+                break
+
+        trades.append(evaluation)
 
     return signals, signal_details, trades
 
@@ -254,7 +249,7 @@ def analyze_alignment(signals, annotations, data):
 
     return matches, false_negatives, false_positives
 
-def print_report(chart_name, signals, trades, matches, false_negatives, false_positives, config):
+def print_report(chart_name, signals, evaluations, matches, false_negatives, false_positives, config):
     print("=" * 60)
     print(f" RENKO BACKTEST & ALIGNMENT REPORT: {chart_name}")
     print("=" * 60)
@@ -266,17 +261,16 @@ def print_report(chart_name, signals, trades, matches, false_negatives, false_po
     print("-" * 60)
 
     # 2. Performance Summary
-    win_trades = [t for t in trades if t["result"] == "Win"]
-    loss_trades = [t for t in trades if t["result"] == "Loss"]
-    total_trades = len(trades)
-    win_rate = (len(win_trades) / total_trades * 100) if total_trades > 0 else 0
-    total_pnl = sum(t["pnl_points"] for t in trades)
+    passed = [item for item in evaluations if item["result"] == "Pass"]
+    failed = [item for item in evaluations if item["result"] == "Fail"]
+    pending = [item for item in evaluations if item["result"] == "Pending"]
+    resolved = len(passed) + len(failed)
+    pass_rate = (len(passed) / resolved * 100) if resolved > 0 else 0
     
-    print("Strategy Performance:")
-    print(f"  - Total Trades Triggered: {total_trades}")
-    print(f"  - Wins: {len(win_trades)} | Losses: {len(loss_trades)}")
-    print(f"  - Strategy Win Rate:     {win_rate:.2f}%")
-    print(f"  - Total Strategy PnL:    {total_pnl:+.2f} points")
+    print("Signal Quality Performance:")
+    print(f"  - Total Signals: {len(evaluations)}")
+    print(f"  - Passed: {len(passed)} | Failed: {len(failed)} | Pending: {len(pending)}")
+    print(f"  - Signal Pass Rate: {pass_rate:.2f}%")
     print("-" * 60)
 
     # 3. Alignment Summary
@@ -370,8 +364,6 @@ if __name__ == "__main__":
     parser.add_argument("--retest-tolerance", type=float, help="Override wick retest tolerance")
     parser.add_argument("--min-wick", type=float, help="Override minimum wick length")
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
-    parser.add_argument("--target", type=float, help="Override profit target points")
-    parser.add_argument("--stop", type=float, help="Override stop loss points")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     
@@ -387,10 +379,6 @@ if __name__ == "__main__":
         config["min_wick_length"] = args.min_wick
     if args.max_ema_dist is not None:
         config["max_ema_distance"] = args.max_ema_dist
-    if args.target is not None:
-        config["target_points"] = args.target
-    if args.stop is not None:
-        config["stop_loss_points"] = args.stop
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")
@@ -406,14 +394,14 @@ if __name__ == "__main__":
             import sys
             sys.exit(0)
             
-        signals, signal_details, trades = run_strategy(data, config)
+        signals, signal_details, signal_evaluations = run_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         
         if args.json:
             result = {
                 "signals": signals,
                 "signal_details": signal_details,
-                "trades": trades,
+                "signal_evaluations": signal_evaluations,
                 "config": config,
                 "alignment": {
                     "matches_count": len(matches),
@@ -423,7 +411,15 @@ if __name__ == "__main__":
             }
             print(json.dumps(result, indent=2))
         else:
-            print_report(args.chart, signals, trades, matches, false_negatives, false_positives, config)
+            print_report(
+                args.chart,
+                signals,
+                signal_evaluations,
+                matches,
+                false_negatives,
+                false_positives,
+                config,
+            )
         
     except Exception as e:
         import sys

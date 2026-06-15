@@ -770,20 +770,40 @@ export default function ChartComponent({
         const chartTime = resolveAnnotationTime(ann);
         if (chartTime) {
           if (ann.action === 'Buy') {
+            let markerText = ann.isSystem ? 'SYS BUY' : 'TEACH BUY';
+            if (ann.isSystem && ann.evaluationResult) {
+              if (ann.evaluationResult === 'Pass') {
+                markerText = 'SYS BUY (+)';
+              } else if (ann.evaluationResult === 'Fail') {
+                markerText = 'SYS BUY (-)';
+              } else if (ann.evaluationResult === 'Pending') {
+                markerText = 'SYS BUY (?)';
+              }
+            }
             markers.push({
               time: chartTime,
               position: 'belowBar',
               color: ann.isSystem ? '#1b5e20' : '#00e676', // Deep forest green for system, emerald for user
               shape: 'arrowUp',
-              text: ann.isSystem ? 'SYS BUY' : 'TEACH BUY',
+              text: markerText,
             });
           } else if (ann.action === 'Sell') {
+            let markerText = ann.isSystem ? 'SYS SELL' : 'TEACH SELL';
+            if (ann.isSystem && ann.evaluationResult) {
+              if (ann.evaluationResult === 'Pass') {
+                markerText = 'SYS SELL (+)';
+              } else if (ann.evaluationResult === 'Fail') {
+                markerText = 'SYS SELL (-)';
+              } else if (ann.evaluationResult === 'Pending') {
+                markerText = 'SYS SELL (?)';
+              }
+            }
             markers.push({
               time: chartTime,
               position: 'aboveBar',
               color: ann.isSystem ? '#b71c1c' : '#ff1744', // Deep red for system, ruby for user
               shape: 'arrowDown',
-              text: ann.isSystem ? 'SYS SELL' : 'TEACH SELL',
+              text: markerText,
             });
           } else if (ann.action === 'Skip') {
             markers.push({

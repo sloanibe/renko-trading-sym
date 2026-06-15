@@ -140,13 +140,6 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.maxEmaDist) {
       cmd += ` --max-ema-dist ${parseFloat(req.query.maxEmaDist)}`;
     }
-    if (req.query.target) {
-      cmd += ` --target ${parseFloat(req.query.target)}`;
-    }
-    if (req.query.stop) {
-      cmd += ` --stop ${parseFloat(req.query.stop)}`;
-    }
-    
     exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
         console.error('Backtester error:', error, stderr);

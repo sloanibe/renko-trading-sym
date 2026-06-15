@@ -85,12 +85,14 @@ We will test three mathematical definitions to detect and skip **Congestion Zone
 
 ---
 
-## 4. Trade & Risk Management
+## 4. Signal Quality Evaluation
 
-Each trade is simulated using fixed parameters which are adjusted during backtesting:
-*   **Target (Take Profit)**: Configured in points (e.g., 30, 45, or 60 points).
-*   **Stop Loss**: Configured in points (e.g., 15 points).
-*   **Position Sizing**: Position sizes are calculated based on Nasdaq point values to align with risk management limits.
+Performance measures entry-signal quality only:
+*   Entry is the signal brick's close.
+*   A signal passes when one same-direction 15-tick brick completes beyond the entry close.
+*   A signal fails when price exceeds the signal brick's tail by 2 MNQ ticks (0.50 points) first.
+*   If both thresholds occur within the same OHLC bar, the result is conservatively counted as a failure.
+*   Signals without a later outcome are pending and excluded from the pass-rate denominator.
 
 ---
 
@@ -107,5 +109,5 @@ The following parameters have been iteratively tuned using the AI feedback loop 
 | `min_wick_length` | Min tail length required to show strong rejection | 5.0 pts | **5.0 pts** |
 | `max_ema_distance` | Max distance from brick close to EMA (over-extension) | 20.0 pts | **60.0 pts** (Lagging EMA clearance) |
 | `congestion_lookback` | Lookback for chop/overlap checks | 6 bricks | **6 bricks** |
-| `target_points` | Profit target in Nasdaq points | 45.0 pts | **45.0 pts** |
-| `stop_loss_points` | Initial stop loss in Nasdaq points | 15.0 pts | **15.0 pts** |
+| `tick_size` | MNQ minimum price increment | 0.25 pts | **0.25 pts** |
+| `tail_break_ticks` | Adverse move beyond signal tail | 2 ticks | **2 ticks** |

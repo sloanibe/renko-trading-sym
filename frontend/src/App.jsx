@@ -38,8 +38,6 @@ export default function App() {
   const [minWick, setMinWick] = useState(5.0);
   const [maxEmaDist, setMaxEmaDist] = useState(20.0);
   const [retestTolerance, setRetestTolerance] = useState(2.0);
-  const [targetPoints, setTargetPoints] = useState(45.0);
-  const [stopLossPoints, setStopLossPoints] = useState(15.0);
   const [optimizing, setOptimizing] = useState(false);
 
   const fetchBacktest = async (chartName, configOverrides = {}) => {
@@ -51,11 +49,9 @@ export default function App() {
     const wick = configOverrides.minWick !== undefined ? configOverrides.minWick : minWick;
     const dist = configOverrides.maxEmaDist !== undefined ? configOverrides.maxEmaDist : maxEmaDist;
     const tol = configOverrides.retestTolerance !== undefined ? configOverrides.retestTolerance : retestTolerance;
-    const tgt = configOverrides.targetPoints !== undefined ? configOverrides.targetPoints : targetPoints;
-    const sl = configOverrides.stopLossPoints !== undefined ? configOverrides.stopLossPoints : stopLossPoints;
 
     try {
-      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}&target=${tgt}&stop=${sl}`;
+      const query = `?slopeThreshold=${slope}&minWick=${wick}&maxEmaDist=${dist}&retestTolerance=${tol}`;
       const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
       const data = await res.json();
       setBacktestResults(data);
@@ -77,17 +73,13 @@ export default function App() {
         setMinWick(bestConfig.min_wick_length);
         setMaxEmaDist(bestConfig.max_ema_distance);
         setRetestTolerance(bestConfig.wick_retest_tolerance);
-        setTargetPoints(bestConfig.target_points);
-        setStopLossPoints(bestConfig.stop_loss_points);
         
         // Fetch backtest with the optimized config overrides immediately
         fetchBacktest(activeChart, {
           slopeThreshold: bestConfig.ema_slope_threshold,
           minWick: bestConfig.min_wick_length,
           maxEmaDist: bestConfig.max_ema_distance,
-          retestTolerance: bestConfig.wick_retest_tolerance,
-          targetPoints: bestConfig.target_points,
-          stopLossPoints: bestConfig.stop_loss_points
+          retestTolerance: bestConfig.wick_retest_tolerance
         });
       } else {
         alert('Optimization failed: ' + (bestConfig.error || 'Unknown error'));
@@ -178,7 +170,7 @@ export default function App() {
       setBacktestResults(null);
       setBookmark(null);
     }
-  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance, targetPoints, stopLossPoints]);
+  }, [activeChart, slopeThreshold, minWick, maxEmaDist, retestTolerance]);
 
   const fetchCharts = async () => {
     try {
@@ -514,12 +506,16 @@ export default function App() {
     const merged = [...currentAnnotations];
     if (backtestResults?.signal_details) {
       backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
+        const evaluation = backtestResults.signal_evaluations?.find(
+          ev => ev.barIndex === barIndex && ev.direction === action
+        );
         merged.push({
           timestamp,
           barIndex,
           action,
           isSystem: true,
           comment: 'System generated entry',
+          evaluationResult: evaluation ? evaluation.result : 'Pending',
         });
       });
     }
@@ -528,14 +524,14 @@ export default function App() {
 
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
-    if (!backtestResults || !backtestResults.trades) return null;
+    if (!backtestResults || !backtestResults.signal_evaluations) return null;
     
-    const trades = backtestResults.trades;
-    const wins = trades.filter(t => t.result === 'Win').length;
-    const losses = trades.filter(t => t.result === 'Loss').length;
-    const totalTrades = trades.length;
-    const winRate = totalTrades > 0 ? (wins / totalTrades * 100).toFixed(1) : '0.0';
-    const totalPnL = trades.reduce((sum, t) => sum + (t.pnl_points || 0), 0).toFixed(1);
+    const evaluations = backtestResults.signal_evaluations;
+    const passed = evaluations.filter(item => item.result === 'Pass').length;
+    const failed = evaluations.filter(item => item.result === 'Fail').length;
+    const pending = evaluations.filter(item => item.result === 'Pending').length;
+    const resolved = passed + failed;
+    const passRate = resolved > 0 ? (passed / resolved * 100).toFixed(1) : '0.0';
     
     const alignment = backtestResults.alignment || {};
     const matches = alignment.matches_count || 0;
@@ -545,11 +541,11 @@ export default function App() {
     const alignmentRate = totalLabeled > 0 ? (matches / totalLabeled * 100).toFixed(1) : '0.0';
     
     return {
-      totalTrades,
-      wins,
-      losses,
-      winRate,
-      totalPnL,
+      totalSignals: evaluations.length,
+      passed,
+      failed,
+      pending,
+      passRate,
       matches,
       missed,
       overTriggers,
@@ -711,30 +707,8 @@ export default function App() {
                   />
                 </div>
 
-                {/* Take Profit / Stop Loss (in two columns) */}
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px' }}>
-                  <div>
-                    <span style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Profit Target (pt):</span>
-                    <input 
-                      type="number" 
-                      min="5" 
-                      max="200" 
-                      value={targetPoints} 
-                      onChange={(e) => setTargetPoints(parseFloat(e.target.value) || 0)}
-                      style={{ width: '100%', padding: '4px 6px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '11px' }}
-                    />
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Stop Loss (pt):</span>
-                    <input 
-                      type="number" 
-                      min="2" 
-                      max="100" 
-                      value={stopLossPoints} 
-                      onChange={(e) => setStopLossPoints(parseFloat(e.target.value) || 0)}
-                      style={{ width: '100%', padding: '4px 6px', borderRadius: '6px', border: '1px solid var(--border-color)', background: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '11px' }}
-                    />
-                  </div>
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                  Performance test: one 15-tick favorable brick before the signal tail is exceeded by 2 ticks.
                 </div>
               </div>
             </div>
@@ -765,26 +739,24 @@ export default function App() {
               <div style={{ background: 'var(--bg-card)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <div>
                   <h4 style={{ color: '#10b981', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>⚙️</span> Strategy Performance
+                    <span>⚙️</span> Signal Quality
                   </h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Total Trades:</span>
-                      <span style={{ fontWeight: '600' }}>{stats.totalTrades}</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Total Signals:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.totalSignals}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Win / Loss:</span>
-                      <span style={{ fontWeight: '600' }}>{stats.wins}W - {stats.losses}L</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Passed / Failed:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.passed}P - {stats.failed}F</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Win Rate:</span>
-                      <span style={{ fontWeight: '600', color: parseFloat(stats.winRate) >= 50 ? '#10b981' : '#ef4444' }}>{stats.winRate}%</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Pass Rate:</span>
+                      <span style={{ fontWeight: '600', color: parseFloat(stats.passRate) >= 50 ? '#10b981' : '#ef4444' }}>{stats.passRate}%</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Total PnL:</span>
-                      <span style={{ fontWeight: '600', color: parseFloat(stats.totalPnL) >= 0 ? '#10b981' : '#ef4444' }}>
-                        {parseFloat(stats.totalPnL) >= 0 ? '+' : ''}{stats.totalPnL} pts
-                      </span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Pending:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.pending}</span>
                     </div>
                   </div>
                 </div>
