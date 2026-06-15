@@ -505,10 +505,37 @@ export default function App() {
     }
   }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, commentText]);
 
-  // Merge system signals with user annotations for chart display
+  // Merge system signals and campaign trades with user annotations for chart display
   const mergedAnnotations = React.useMemo(() => {
     const merged = [...currentAnnotations];
-    if (backtestResults?.signal_details) {
+    
+    if (backtestResults?.campaign_results?.daily_reports) {
+      backtestResults.campaign_results.daily_reports.forEach(day => {
+        if (day.trades) {
+          day.trades.forEach((trade, idx) => {
+            // Campaign Entry Marker
+            merged.push({
+              timestamp: trade.entry_time,
+              action: trade.direction,
+              isCampaignEntry: true,
+              tradeIndex: idx + 1,
+              comment: `Campaign trade entry #${idx+1}`,
+            });
+            
+            // Campaign Exit Marker
+            merged.push({
+              timestamp: trade.exit_time,
+              action: trade.direction, // preserve direction for resolve
+              direction: trade.direction,
+              isCampaignExit: true,
+              exitResult: trade.result,
+              tradeIndex: idx + 1,
+              comment: `Campaign trade exit #${idx+1} (${trade.result})`,
+            });
+          });
+        }
+      });
+    } else if (backtestResults?.signal_details) {
       backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
         const evaluation = backtestResults.signal_evaluations?.find(
           ev => ev.barIndex === barIndex && ev.direction === action

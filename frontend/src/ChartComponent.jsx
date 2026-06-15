@@ -797,7 +797,45 @@ export default function ChartComponent({
       annotations.forEach(ann => {
         const chartTime = resolveAnnotationTime(ann);
         if (chartTime) {
-          if (ann.action === 'Buy') {
+          if (ann.isCampaignEntry) {
+            markers.push({
+              time: chartTime,
+              position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
+              color: ann.action === 'Buy' ? '#6366f1' : '#ec4899', // Indigo for Buy, Pink for Sell
+              shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
+              text: `${ann.action === 'Buy' ? '🔑 BUY' : '🔑 SELL'} #${ann.tradeIndex}`,
+            });
+          } else if (ann.isCampaignExit) {
+            let color = '#94a3b8'; // Slate for BE/End
+            let shape = 'circle';
+            let label = `EXIT #${ann.tradeIndex}`;
+            
+            if (ann.exitResult === 'Win') {
+              color = '#10b981'; // Emerald
+              shape = 'square';
+              label = `🏆 WIN #${ann.tradeIndex} (+2.0)`;
+            } else if (ann.exitResult === 'Loss') {
+              color = '#ef4444'; // Red
+              shape = 'square';
+              label = `❌ LOSS #${ann.tradeIndex} (-2.0)`;
+            } else if (ann.exitResult === 'BE') {
+              color = '#64748b'; // Slate
+              shape = 'circle';
+              label = `🤝 BE #${ann.tradeIndex}`;
+            } else if (ann.exitResult === 'EndSession') {
+              color = '#64748b';
+              shape = 'circle';
+              label = `🚪 END #${ann.tradeIndex}`;
+            }
+            
+            markers.push({
+              time: chartTime,
+              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar', // Exit is opposite to entry direction
+              color: color,
+              shape: shape,
+              text: label,
+            });
+          } else if (ann.action === 'Buy') {
             let markerText = ann.isSystem ? 'SYS BUY' : 'TEACH BUY';
             if (ann.isSystem && ann.evaluationResult) {
               if (ann.evaluationResult === 'Pass') {
