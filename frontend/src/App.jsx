@@ -40,7 +40,7 @@ export default function App() {
   const [retestTolerance, setRetestTolerance] = useState(2.0);
   const [ema24Slope, setEma24Slope] = useState(0.25);
   const [cooldownBars, setCooldownBars] = useState(0);
-  const [exitStrategy, setExitStrategy] = useState('stepup'); // 'fixed', 'trail', or 'stepup' (Step Up on Loss by default)
+  const [exitStrategy, setExitStrategy] = useState('fixed'); // 'fixed', 'trail', or 'stepup' (Fixed Target by default)
   const [hideUntakenSignals, setHideUntakenSignals] = useState(true);
   const [optimizing, setOptimizing] = useState(false);
 
