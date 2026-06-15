@@ -801,29 +801,29 @@ export default function ChartComponent({
             markers.push({
               time: chartTime,
               position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
-              color: ann.action === 'Buy' ? '#6366f1' : '#ec4899', // Indigo for Buy, Pink for Sell
+              color: ann.action === 'Buy' ? '#1d4ed8' : '#a21caf', // Dark Royal Blue for Buy, Dark Magenta for Sell
               shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
               text: `${ann.action === 'Buy' ? '🔑 BUY' : '🔑 SELL'} #${ann.tradeIndex}`,
             });
           } else if (ann.isCampaignExit) {
-            let color = '#94a3b8'; // Slate for BE/End
+            let color = '#475569'; // Dark Slate for BE/End
             let shape = 'circle';
             let label = `EXIT #${ann.tradeIndex}`;
             
             if (ann.exitResult === 'Win') {
-              color = '#10b981'; // Emerald
+              color = '#15803d'; // Dark Forest Green
               shape = 'square';
               label = `🏆 WIN #${ann.tradeIndex} (+2.0)`;
             } else if (ann.exitResult === 'Loss') {
-              color = '#ef4444'; // Red
+              color = '#b91c1c'; // Dark Crimson Red
               shape = 'square';
               label = `❌ LOSS #${ann.tradeIndex} (-2.0)`;
             } else if (ann.exitResult === 'BE') {
-              color = '#64748b'; // Slate
+              color = '#475569'; // Dark Slate Gray
               shape = 'circle';
               label = `🤝 BE #${ann.tradeIndex}`;
             } else if (ann.exitResult === 'EndSession') {
-              color = '#64748b';
+              color = '#475569';
               shape = 'circle';
               label = `🚪 END #${ann.tradeIndex}`;
             }
@@ -849,7 +849,7 @@ export default function ChartComponent({
             markers.push({
               time: chartTime,
               position: 'belowBar',
-              color: ann.isSystem ? '#1b5e20' : '#00e676', // Deep forest green for system, emerald for user
+              color: ann.isSystem ? '#14532d' : '#15803d', // Very dark forest green for system, dark green for user
               shape: 'arrowUp',
               text: markerText,
             });
@@ -867,7 +867,7 @@ export default function ChartComponent({
             markers.push({
               time: chartTime,
               position: 'aboveBar',
-              color: ann.isSystem ? '#b71c1c' : '#ff1744', // Deep red for system, ruby for user
+              color: ann.isSystem ? '#7f1d1d' : '#b91c1c', // Very dark red for system, crimson for user
               shape: 'arrowDown',
               text: markerText,
             });
@@ -875,7 +875,7 @@ export default function ChartComponent({
             markers.push({
               time: chartTime,
               position: 'aboveBar',
-              color: '#ff9100', // Amber Orange
+              color: '#c2410c', // Dark Amber Orange
               shape: 'circle',
               text: 'TEACH SKIP',
             });

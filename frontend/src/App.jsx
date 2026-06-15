@@ -505,10 +505,28 @@ export default function App() {
     }
   }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, commentText]);
 
-  // Merge system signals and campaign trades with user annotations for chart display
+  // Merge system signals and campaign trades (excluding user annotations) for chart display
   const mergedAnnotations = React.useMemo(() => {
-    const merged = [...currentAnnotations];
+    const merged = [];
     
+    // 1. Add all system signals (from backtester)
+    if (backtestResults?.signal_details) {
+      backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
+        const evaluation = backtestResults.signal_evaluations?.find(
+          ev => ev.barIndex === barIndex && ev.direction === action
+        );
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          comment: 'System generated entry',
+          evaluationResult: evaluation ? evaluation.result : 'Pending',
+        });
+      });
+    }
+    
+    // 2. Add campaign trade markers (entries & exits)
     if (backtestResults?.campaign_results?.daily_reports) {
       backtestResults.campaign_results.daily_reports.forEach(day => {
         if (day.trades) {
@@ -535,23 +553,10 @@ export default function App() {
           });
         }
       });
-    } else if (backtestResults?.signal_details) {
-      backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
-        const evaluation = backtestResults.signal_evaluations?.find(
-          ev => ev.barIndex === barIndex && ev.direction === action
-        );
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          comment: 'System generated entry',
-          evaluationResult: evaluation ? evaluation.result : 'Pending',
-        });
-      });
     }
+    
     return merged;
-  }, [currentAnnotations, backtestResults]);
+  }, [backtestResults]);
 
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
