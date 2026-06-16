@@ -712,10 +712,28 @@ export default function ChartComponent({
 
     const visibleBars = Math.min(180, formattedData.length);
     const from = Math.max(0, Math.min(formattedData.length - visibleBars, bestIndex - visibleBars / 2));
+    const to = from + visibleBars;
     chart.timeScale().setVisibleLogicalRange({
       from,
-      to: from + visibleBars,
+      to,
     });
+
+    const visibleData = formattedData.slice(Math.floor(from), Math.ceil(to) + 1);
+    const values = visibleData.flatMap(item => [
+      item.high,
+      item.low,
+      item.ma1,
+      item.ma2,
+    ]).filter(Number.isFinite);
+    if (values.length > 0) {
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const padding = Math.max((max - min) * 0.12, 0.5);
+      chart.priceScale('right').setVisibleRange({
+        from: min - padding,
+        to: max + padding,
+      });
+    }
   };
 
   const centerPrimaryPaneOnTime = (originalTime) => {
@@ -730,7 +748,7 @@ export default function ChartComponent({
     goToBarIndex(nearestBar.originalIndex);
   };
 
-  const syncCrosshairFromBar = (source, sourceBar) => {
+  const syncCrosshairFromBar = (source, sourceBar, sourcePrice = null) => {
     if (!sourceBar || !hasSecondaryPaneRef.current || isSyncingCrosshairRef.current) return;
 
     const targetData = source === 'primary'
@@ -747,8 +765,9 @@ export default function ChartComponent({
     const targetBar = findNearestBarByMs(targetData, parseOriginalTimeMs(sourceBar.originalTime));
     if (!targetBar) return;
 
+    const targetPrice = Number.isFinite(sourcePrice) ? sourcePrice : targetBar.close;
     isSyncingCrosshairRef.current = true;
-    targetChart.setCrosshairPosition(targetBar.close, targetBar.time, targetSeries);
+    targetChart.setCrosshairPosition(targetPrice, targetBar.time, targetSeries);
     requestAnimationFrame(() => {
       isSyncingCrosshairRef.current = false;
     });
@@ -1054,7 +1073,10 @@ export default function ChartComponent({
       const barIndex = barIndexByChartTime.get(param.time);
       if (Number.isInteger(barIndex)) crosshairBarIndexRef.current = barIndex;
       if (!isSyncingCrosshairRef.current) {
-        syncCrosshairFromBar('primary', primaryBarByChartTimeRef.current.get(param.time));
+        const sourcePrice = Number.isFinite(param.point?.y)
+          ? candlestickSeriesRef.current?.coordinateToPrice(param.point.y)
+          : null;
+        syncCrosshairFromBar('primary', primaryBarByChartTimeRef.current.get(param.time), sourcePrice);
       }
     });
 
@@ -1262,7 +1284,10 @@ export default function ChartComponent({
         return;
       }
       if (!isSyncingCrosshairRef.current) {
-        syncCrosshairFromBar('secondary', secondaryBarByChartTimeRef.current.get(param.time));
+        const sourcePrice = Number.isFinite(param.point?.y)
+          ? secondaryCandlestickSeriesRef.current?.coordinateToPrice(param.point.y)
+          : null;
+        syncCrosshairFromBar('secondary', secondaryBarByChartTimeRef.current.get(param.time), sourcePrice);
       }
     });
 

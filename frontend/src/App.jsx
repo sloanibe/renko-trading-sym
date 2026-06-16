@@ -921,18 +921,6 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Header */}
-      <header className="app-header">
-        <div className="brand-section">
-          <div className="brand-logo">R</div>
-          <div className="brand-title">Renko Strategy Explorer</div>
-        </div>
-        <div className="system-status">
-          <div className="status-dot"></div>
-          <span>Local Engine Active</span>
-        </div>
-      </header>
-
       <button
         type="button"
         className="datasets-drawer-button"
@@ -1657,6 +1645,10 @@ export default function App() {
             <>
               <div className="floating-info">
                 <h4>{activeChart}</h4>
+                <div className="inline-status">
+                  <span className="status-dot"></span>
+                  <span>Local Engine Active</span>
+                </div>
                 <div>Bricks: {chartData.length}</div>
                 {activeChart === 'MES3' && secondaryChartData.length > 0 && (
                   <div>HA 2s Bars: {secondaryChartData.length}</div>
