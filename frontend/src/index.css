@@ -69,7 +69,7 @@ body {
 /* Layout */
 .app-container {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: 1fr;
   grid-template-rows: 70px 1fr;
   height: 100vh;
   width: 100vw;
@@ -136,6 +136,13 @@ body {
 
 /* Sidebar */
 .app-sidebar {
+  position: fixed;
+  top: 70px;
+  left: 0;
+  bottom: 0;
+  z-index: 70;
+  width: 340px;
+  transform: translateX(-100%);
   background: var(--bg-sidebar);
   border-right: 1px solid var(--border-color);
   backdrop-filter: blur(10px);
@@ -144,6 +151,52 @@ body {
   flex-direction: column;
   gap: 24px;
   overflow-y: auto;
+  transition: transform 0.2s ease;
+  box-shadow: 18px 0 40px rgba(0, 0, 0, 0.34);
+}
+
+.app-sidebar.open {
+  transform: translateX(0);
+}
+
+.datasets-drawer-button {
+  position: fixed;
+  top: 50%;
+  left: 0;
+  z-index: 60;
+  background: rgba(12, 14, 18, 0.88);
+  border: 1px solid var(--border-color);
+  border-left: 0;
+  border-radius: 0 7px 7px 0;
+  color: var(--text-main);
+  padding: 10px 9px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+}
+
+.datasets-drawer-button:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.datasets-drawer-backdrop {
+  position: fixed;
+  inset: 70px 0 0 0;
+  z-index: 65;
+  background: rgba(0, 0, 0, 0.24);
+}
+
+.drawer-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
 .section-title {
@@ -230,8 +283,6 @@ body {
 
 /* Main Workspace */
 .main-workspace {
-  display: grid;
-  grid-template-rows: 1fr 240px;
   height: calc(100vh - 70px);
   overflow: hidden;
 }
@@ -240,7 +291,6 @@ body {
 .chart-container {
   position: relative;
   background-color: #9c9c9c; /* MultiCharts neutral grey default background */
-  border-bottom: 1px solid var(--border-color);
   width: 100%;
   height: 100%;
 }
@@ -275,6 +325,93 @@ body {
   font-size: 14px;
   color: var(--primary);
   margin-bottom: 4px;
+}
+
+.chart-splitter {
+  flex: 0 0 8px;
+  background: rgba(18, 22, 30, 0.88);
+  border-top: 1px solid rgba(0, 0, 0, 0.35);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  cursor: row-resize;
+  position: relative;
+}
+
+.chart-splitter::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.32);
+  transform: translate(-50%, -50%);
+}
+
+.chart-splitter:hover {
+  background: rgba(0, 229, 255, 0.14);
+}
+
+.chart-splitter:hover::after {
+  background: var(--primary);
+}
+
+.annotations-drawer-button {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 6;
+  background: rgba(12, 14, 18, 0.88);
+  border: 1px solid var(--border-color);
+  border-radius: 7px;
+  color: var(--text-main);
+  padding: 8px 11px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+.annotations-drawer-button:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+
+.annotations-drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.32);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.annotations-drawer {
+  width: min(920px, 82vw);
+  height: 100%;
+  background: var(--bg-sidebar);
+  border-left: 1px solid var(--border-color);
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.38);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawer-close-button {
+  border: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 7px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.drawer-close-button:hover {
+  color: var(--primary);
+  border-color: var(--primary);
 }
 
 /* Details Panel (Annotations list) */
@@ -338,6 +475,16 @@ body {
   background-color: rgba(255, 145, 0, 0.15);
   color: var(--color-skip);
   border: 1px solid var(--color-skip);
+}
+
+.badge.marker-set {
+  max-width: 120px;
+  color: #bae6fd;
+  background-color: rgba(14, 116, 144, 0.18);
+  border: 1px solid rgba(34, 211, 238, 0.45);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Modal Popup Dialog */
@@ -458,6 +605,17 @@ body {
   background: var(--color-skip);
   color: #0c0e12;
   box-shadow: 0 0 8px var(--color-skip-glow);
+}
+
+.marker-set-select {
+  width: 100%;
+  height: 34px;
+  background: var(--bg-main);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  padding: 0 8px;
+  color: var(--text-main);
+  font-size: 12px;
 }
 
 .comment-input {

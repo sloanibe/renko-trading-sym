@@ -170,6 +170,9 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.aridMinGap !== undefined) {
       cmd += ` --arid-min-gap ${parseFloat(req.query.aridMinGap)}`;
     }
+    if (req.query.bounceType && ['all', 'yellow', 'green'].includes(req.query.bounceType)) {
+      cmd += ` --bounce-type ${req.query.bounceType}`;
+    }
     if (req.query.set3LeftLookback !== undefined) {
       cmd += ` --set3-left-lookback ${parseInt(req.query.set3LeftLookback, 10)}`;
     }
@@ -181,6 +184,36 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     }
     if (req.query.set3MinGap !== undefined) {
       cmd += ` --set3-min-gap ${parseFloat(req.query.set3MinGap)}`;
+    }
+    if (req.query.set3SyntheticMinGap !== undefined) {
+      cmd += ` --set3-synthetic-min-gap ${parseFloat(req.query.set3SyntheticMinGap)}`;
+    }
+    if (req.query.yellowSlopePeriod !== undefined) {
+      cmd += ` --yellow-slope-period ${parseInt(req.query.yellowSlopePeriod, 10)}`;
+    }
+    if (req.query.yellowFastSlope !== undefined) {
+      cmd += ` --yellow-fast-slope ${parseFloat(req.query.yellowFastSlope)}`;
+    }
+    if (req.query.yellowSlowSlope !== undefined) {
+      cmd += ` --yellow-slow-slope ${parseFloat(req.query.yellowSlowSlope)}`;
+    }
+    if (req.query.yellowMinGap !== undefined) {
+      cmd += ` --yellow-min-gap ${parseFloat(req.query.yellowMinGap)}`;
+    }
+    if (req.query.yellowMinPenetration !== undefined) {
+      cmd += ` --yellow-min-penetration ${parseFloat(req.query.yellowMinPenetration)}`;
+    }
+    if (req.query.yellowMinTail !== undefined) {
+      cmd += ` --yellow-min-tail ${parseFloat(req.query.yellowMinTail)}`;
+    }
+    if (req.query.yellowArityLookback !== undefined) {
+      cmd += ` --yellow-arity-lookback ${parseInt(req.query.yellowArityLookback, 10)}`;
+    }
+    if (req.query.yellowMaxOverlap !== undefined) {
+      cmd += ` --yellow-max-overlap ${parseFloat(req.query.yellowMaxOverlap)}`;
+    }
+    if (req.query.yellowMaxReversals !== undefined) {
+      cmd += ` --yellow-max-reversals ${parseInt(req.query.yellowMaxReversals, 10)}`;
     }
     exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
@@ -197,6 +230,37 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error during backtest initiation', details: error.message });
+  }
+});
+
+// Endpoint: Run Yellow Momentum 1:1 optimization
+app.get('/api/charts/:name/optimize-yellow-momentum', (req, res) => {
+  try {
+    const chartName = req.params.name;
+    const pythonScript = path.join(__dirname, '..', 'backend', 'backtester.py');
+    let cmd = `python3 "${pythonScript}" --chart "${chartName}" --optimize-yellow-momentum`;
+    if (req.query.startTime) {
+      cmd += ` --start-time ${req.query.startTime}`;
+    }
+    if (req.query.endTime) {
+      cmd += ` --end-time ${req.query.endTime}`;
+    }
+    
+    exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
+      if (error) {
+        console.error('Yellow Momentum optimizer error:', error, stderr);
+        return res.status(500).json({ error: 'Failed to run Yellow Momentum optimizer', details: stderr || error.message });
+      }
+      try {
+        const results = JSON.parse(stdout);
+        res.json(results);
+      } catch (parseError) {
+        console.error('Failed to parse Yellow Momentum optimizer JSON output:', stdout);
+        res.status(500).json({ error: 'Failed to parse Yellow Momentum optimizer output', details: parseError.message, stdout });
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Server error during Yellow Momentum optimization initiation', details: error.message });
   }
 });
 

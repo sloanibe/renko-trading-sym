@@ -3,7 +3,30 @@ import ChartComponent from './ChartComponent';
 
 const API_BASE = 'http://localhost:5000/api';
 const ACTIVE_CHART_STORAGE_KEY = 'renko-active-chart';
+const RAW_RANGE_MARKER_SET = 'Raw Range Bar Set';
+const CAMPAIGN_OPTIONS = {
+  yellowMomentum: {
+    label: 'Yellow Momentum 1:1',
+    resultKey: 'yellow_momentum_campaign_results',
+    entryFlag: 'isYellowMomentumCampaignEntry',
+    exitFlag: 'isYellowMomentumCampaignExit',
+  },
+  emaBounce: {
+    label: 'Campaign EMA Bounce',
+    resultKey: 'ema_bounce_campaign_results',
+    entryFlag: 'isEmaBounceCampaignEntry',
+    exitFlag: 'isEmaBounceCampaignExit',
+  },
+  dailyTarget: {
+    label: 'Daily Target Campaign',
+    resultKey: 'campaign_results',
+    entryFlag: 'isCampaignEntry',
+    exitFlag: 'isCampaignExit',
+  },
+};
 const bookmarkStorageKey = chartName => `renko-bookmark:${chartName}`;
+const defaultMarkerSetForChart = chartName =>
+  chartName?.includes('Range') || chartName === 'MES3' ? RAW_RANGE_MARKER_SET : 'Training Set';
 
 const metricsMatchBrick = (metrics, brick) => {
   if (!metrics || !brick) return false;
@@ -27,12 +50,15 @@ export default function App() {
   const [charts, setCharts] = useState([]);
   const [activeChart, setActiveChart] = useState('');
   const [chartData, setChartData] = useState([]);
+  const [secondaryChartData, setSecondaryChartData] = useState([]);
   const [allAnnotations, setAllAnnotations] = useState({});
   const [selectedBrick, setSelectedBrick] = useState(null);
   const [backtestResults, setBacktestResults] = useState(null);
   const [loadingBacktest, setLoadingBacktest] = useState(false);
   const [discussionStatus, setDiscussionStatus] = useState('');
   const [bookmark, setBookmark] = useState(null);
+  const [annotationsDrawerOpen, setAnnotationsDrawerOpen] = useState(false);
+  const [datasetsDrawerOpen, setDatasetsDrawerOpen] = useState(false);
 
   // Strategy Configuration states
   const [slopeThreshold, setSlopeThreshold] = useState(2.0);
@@ -43,20 +69,37 @@ export default function App() {
   const [wickBodyOffset, setWickBodyOffset] = useState(0);
   const [sessionStartTime, setSessionStartTime] = useState('06:31:00');
   const [exitStrategy, setExitStrategy] = useState('fixed'); // 'fixed', 'trail', or 'stepup' (Fixed Target by default)
+  const [showTrainingAnnotations, setShowTrainingAnnotations] = useState(false);
   const [showRawSignals, setShowRawSignals] = useState(false);
   const [showSignalSet2, setShowSignalSet2] = useState(true);
   const [showSignalSet3, setShowSignalSet3] = useState(true);
+  const [showMes3TrendTailSignals, setShowMes3TrendTailSignals] = useState(false);
+  const [showMes3PreviousTailSignals, setShowMes3PreviousTailSignals] = useState(true);
   const [showCampaignTrades, setShowCampaignTrades] = useState(true);
+  const [campaignView, setCampaignView] = useState('yellowMomentum');
   const [aridLookback, setAridLookback] = useState(8);
-  const [aridMaxOverlap, setAridMaxOverlap] = useState(0.5);
-  const [aridMaxReversals, setAridMaxReversals] = useState(1);
-  const [aridSlopeThreshold, setAridSlopeThreshold] = useState(4.0);
+  const [aridMaxOverlap, setAridMaxOverlap] = useState(0.95);
+  const [aridMaxReversals, setAridMaxReversals] = useState(5);
+  const [aridSlopeThreshold, setAridSlopeThreshold] = useState(10.0);
   const [aridMinGap, setAridMinGap] = useState(0.5);
+  const [bounceType, setBounceType] = useState('green');
   const [set3LeftLookback, setSet3LeftLookback] = useState(8);
   const [set3MaxLeftOverlaps, setSet3MaxLeftOverlaps] = useState(1);
   const [set3SlopeThreshold, setSet3SlopeThreshold] = useState(4.0);
   const [set3MinGap, setSet3MinGap] = useState(0.5);
+  const [set3SyntheticMinGap, setSet3SyntheticMinGap] = useState(-0.25);
   const [optimizing, setOptimizing] = useState(false);
+  const [optimizingYellowMomentum, setOptimizingYellowMomentum] = useState(false);
+  const [yellowOptimizationSummary, setYellowOptimizationSummary] = useState(null);
+  const [yellowSlopePeriod, setYellowSlopePeriod] = useState(8);
+  const [yellowFastSlope, setYellowFastSlope] = useState(30.0);
+  const [yellowSlowSlope, setYellowSlowSlope] = useState(25.0);
+  const [yellowMinGap, setYellowMinGap] = useState(4.0);
+  const [yellowMinPenetration, setYellowMinPenetration] = useState(1.5);
+  const [yellowMinTail, setYellowMinTail] = useState(1.0);
+  const [yellowArityLookback, setYellowArityLookback] = useState(8);
+  const [yellowMaxOverlap, setYellowMaxOverlap] = useState(0.95);
+  const [yellowMaxReversals, setYellowMaxReversals] = useState(5);
 
   const fetchBacktest = async (chartName, configOverrides = {}) => {
     if (!chartName) return;
@@ -71,6 +114,15 @@ export default function App() {
     const exitStrategyVal = configOverrides.exitStrategy !== undefined ? configOverrides.exitStrategy : exitStrategy;
     const wickOffset = configOverrides.wickBodyOffset !== undefined ? configOverrides.wickBodyOffset : wickBodyOffset;
     const startTime = configOverrides.sessionStartTime !== undefined ? configOverrides.sessionStartTime : sessionStartTime;
+    const yellowSlopePeriodVal = configOverrides.yellowSlopePeriod !== undefined ? configOverrides.yellowSlopePeriod : yellowSlopePeriod;
+    const yellowFastSlopeVal = configOverrides.yellowFastSlope !== undefined ? configOverrides.yellowFastSlope : yellowFastSlope;
+    const yellowSlowSlopeVal = configOverrides.yellowSlowSlope !== undefined ? configOverrides.yellowSlowSlope : yellowSlowSlope;
+    const yellowMinGapVal = configOverrides.yellowMinGap !== undefined ? configOverrides.yellowMinGap : yellowMinGap;
+    const yellowMinPenetrationVal = configOverrides.yellowMinPenetration !== undefined ? configOverrides.yellowMinPenetration : yellowMinPenetration;
+    const yellowMinTailVal = configOverrides.yellowMinTail !== undefined ? configOverrides.yellowMinTail : yellowMinTail;
+    const yellowArityLookbackVal = configOverrides.yellowArityLookback !== undefined ? configOverrides.yellowArityLookback : yellowArityLookback;
+    const yellowMaxOverlapVal = configOverrides.yellowMaxOverlap !== undefined ? configOverrides.yellowMaxOverlap : yellowMaxOverlap;
+    const yellowMaxReversalsVal = configOverrides.yellowMaxReversals !== undefined ? configOverrides.yellowMaxReversals : yellowMaxReversals;
 
     try {
       const params = new URLSearchParams({
@@ -87,10 +139,21 @@ export default function App() {
         aridMaxReversals,
         aridSlopeThreshold,
         aridMinGap,
+        bounceType,
         set3LeftLookback,
         set3MaxLeftOverlaps,
         set3SlopeThreshold,
         set3MinGap,
+        set3SyntheticMinGap,
+        yellowSlopePeriod: yellowSlopePeriodVal,
+        yellowFastSlope: yellowFastSlopeVal,
+        yellowSlowSlope: yellowSlowSlopeVal,
+        yellowMinGap: yellowMinGapVal,
+        yellowMinPenetration: yellowMinPenetrationVal,
+        yellowMinTail: yellowMinTailVal,
+        yellowArityLookback: yellowArityLookbackVal,
+        yellowMaxOverlap: yellowMaxOverlapVal,
+        yellowMaxReversals: yellowMaxReversalsVal,
       });
       const query = `?${params.toString()}`;
       const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
@@ -132,10 +195,59 @@ export default function App() {
       setOptimizing(false);
     }
   };
+
+  const handleOptimizeYellowMomentum = async () => {
+    if (!activeChart) return;
+    setOptimizingYellowMomentum(true);
+    try {
+      const params = new URLSearchParams({
+        startTime: sessionStartTime,
+      });
+      const res = await fetch(`${API_BASE}/charts/${activeChart}/optimize-yellow-momentum?${params.toString()}`);
+      const optimization = await res.json();
+      if (!optimization || optimization.error) {
+        alert('Yellow Momentum optimization failed: ' + (optimization?.error || 'Unknown error'));
+        return;
+      }
+
+      const cfg = optimization.best_config || {};
+      const nextConfig = {
+        yellowSlopePeriod: cfg.yellow_momentum_slope_period ?? yellowSlopePeriod,
+        yellowFastSlope: cfg.yellow_momentum_fast_slope_threshold ?? yellowFastSlope,
+        yellowSlowSlope: cfg.yellow_momentum_slow_slope_threshold ?? yellowSlowSlope,
+        yellowMinGap: cfg.yellow_momentum_min_ema_gap ?? yellowMinGap,
+        yellowMinPenetration: cfg.yellow_momentum_min_penetration ?? yellowMinPenetration,
+        yellowMinTail: cfg.yellow_momentum_min_tail ?? yellowMinTail,
+        yellowArityLookback: cfg.yellow_momentum_arity_lookback ?? yellowArityLookback,
+        yellowMaxOverlap: cfg.yellow_momentum_max_overlap ?? yellowMaxOverlap,
+        yellowMaxReversals: cfg.yellow_momentum_max_reversals ?? yellowMaxReversals,
+      };
+
+      setYellowSlopePeriod(nextConfig.yellowSlopePeriod);
+      setYellowFastSlope(nextConfig.yellowFastSlope);
+      setYellowSlowSlope(nextConfig.yellowSlowSlope);
+      setYellowMinGap(nextConfig.yellowMinGap);
+      setYellowMinPenetration(nextConfig.yellowMinPenetration);
+      setYellowMinTail(nextConfig.yellowMinTail);
+      setYellowArityLookback(nextConfig.yellowArityLookback);
+      setYellowMaxOverlap(nextConfig.yellowMaxOverlap);
+      setYellowMaxReversals(nextConfig.yellowMaxReversals);
+      setYellowOptimizationSummary(optimization);
+      setCampaignView('yellowMomentum');
+      setShowCampaignTrades(true);
+      fetchBacktest(activeChart, nextConfig);
+    } catch (err) {
+      console.error('Failed to optimize Yellow Momentum parameters:', err);
+      alert('Failed to connect to the Yellow Momentum optimization engine.');
+    } finally {
+      setOptimizingYellowMomentum(false);
+    }
+  };
   
   // Modal state
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedAction, setSelectedAction] = useState('');
+  const [selectedMarkerSet, setSelectedMarkerSet] = useState('');
   const [commentText, setCommentText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
 
@@ -205,6 +317,11 @@ export default function App() {
   useEffect(() => {
     if (activeChart) {
       fetchChartData(activeChart);
+      if (activeChart === 'MES3') {
+        fetchSecondaryChartData('MES_2sec_HA');
+      } else {
+        setSecondaryChartData([]);
+      }
       fetchBacktest(activeChart);
       const savedBookmark = localStorage.getItem(bookmarkStorageKey(activeChart));
       try {
@@ -214,6 +331,7 @@ export default function App() {
       }
     } else {
       setChartData([]);
+      setSecondaryChartData([]);
       setBacktestResults(null);
       setBookmark(null);
     }
@@ -232,10 +350,21 @@ export default function App() {
     aridMaxReversals,
     aridSlopeThreshold,
     aridMinGap,
+    bounceType,
     set3LeftLookback,
     set3MaxLeftOverlaps,
     set3SlopeThreshold,
     set3MinGap,
+    set3SyntheticMinGap,
+    yellowSlopePeriod,
+    yellowFastSlope,
+    yellowSlowSlope,
+    yellowMinGap,
+    yellowMinPenetration,
+    yellowMinTail,
+    yellowArityLookback,
+    yellowMaxOverlap,
+    yellowMaxReversals,
   ]);
 
   const fetchCharts = async () => {
@@ -272,6 +401,21 @@ export default function App() {
     }
   };
 
+  const fetchSecondaryChartData = async (name) => {
+    try {
+      const res = await fetch(`${API_BASE}/charts/${name}`);
+      if (!res.ok) {
+        setSecondaryChartData([]);
+        return;
+      }
+      const data = await res.json();
+      setSecondaryChartData(data);
+    } catch (err) {
+      console.error('Failed to fetch secondary chart data:', err);
+      setSecondaryChartData([]);
+    }
+  };
+
   // Handle keyboard shortcuts when modal is open
   useEffect(() => {
     if (!modalOpen || !selectedBrick) return;
@@ -304,7 +448,7 @@ export default function App() {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [modalOpen, selectedAction, commentText, selectedBrick, activeChart]);
+  }, [modalOpen, selectedAction, selectedMarkerSet, commentText, selectedBrick, activeChart]);
 
   const handleBrickClick = (brick, clickPoint) => {
     // Match the exact brick; imported Renko data can contain duplicate timestamps.
@@ -379,9 +523,11 @@ export default function App() {
     setSelectedBrick(brick);
     if (existing) {
       setSelectedAction(existing.action);
+      setSelectedMarkerSet(existing.markerSet || defaultMarkerSetForChart(activeChart));
       setCommentText(existing.comment || '');
       setIsEditing(true);
     } else {
+      setSelectedMarkerSet(defaultMarkerSetForChart(activeChart));
       // Check if there is a system signal for this brick
       const sysSignal = backtestResults?.signal_details?.find(
         signal => signal.barIndex === brick.originalIndex
@@ -439,6 +585,7 @@ export default function App() {
       timestamp: targetTime,
       barIndex: selectedBrick.originalIndex,
       action: selectedAction,
+      markerSet: selectedMarkerSet || defaultMarkerSetForChart(activeChart),
       comment: commentText,
       metrics: {
         open: selectedBrick.open,
@@ -446,6 +593,8 @@ export default function App() {
         low: selectedBrick.low,
         close: selectedBrick.close,
         ema: selectedBrick.ema,
+        ema5: selectedBrick.ema5,
+        ema10: selectedBrick.ema10,
       }
     };
 
@@ -464,6 +613,7 @@ export default function App() {
     // Optimistically update UI
     const updated = { ...allAnnotations, [activeChart]: activeAnnotations };
     setAllAnnotations(updated);
+    setShowTrainingAnnotations(true);
     setModalOpen(false);
 
     // Persist to disk via Node Express server
@@ -546,6 +696,7 @@ export default function App() {
       timestamp: selectedBrick.originalTime || selectedBrick.time,
       barIndex: selectedBrick.originalIndex,
       action: selectedAction,
+      markerSet: selectedMarkerSet || defaultMarkerSetForChart(activeChart),
       comment: commentText,
       metrics: {
         open: selectedBrick.open,
@@ -553,6 +704,8 @@ export default function App() {
         low: selectedBrick.low,
         close: selectedBrick.close,
         ema: selectedBrick.ema,
+        ema5: selectedBrick.ema5,
+        ema10: selectedBrick.ema10,
       },
       isPreview: true,
     };
@@ -566,11 +719,14 @@ export default function App() {
     } else {
       return [...savedAnnotations, previewAnn];
     }
-  }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, commentText]);
+  }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, selectedMarkerSet, commentText, activeChart]);
 
   // Merge user annotations, system signals, and campaign trades for chart display
   const mergedAnnotations = React.useMemo(() => {
-    const merged = [...currentAnnotations];
+    const shouldShowManualAnnotations = showTrainingAnnotations || activeChart === 'MES3' || modalOpen;
+    const merged = shouldShowManualAnnotations
+      ? [...currentAnnotations]
+      : currentAnnotations.filter(annotation => annotation.isPreview);
     
     // 1. Add every raw strategy signal, including signals skipped by the campaign.
     if (showRawSignals && backtestResults?.signal_details) {
@@ -602,17 +758,24 @@ export default function App() {
           isSystem: true,
           signalSet: 2,
           metrics,
-          comment: 'Arid trend signal',
+          comment: 'EMA bounce signal',
           evaluationResult: evaluation ? evaluation.result : 'Pending',
         });
       });
     }
 
     if (showSignalSet3 && backtestResults?.signal_set_3_details) {
-      backtestResults.signal_set_3_details.forEach(({ barIndex, markerBarIndex, timestamp, markerTimestamp, action, metrics }) => {
+      backtestResults.signal_set_3_details.forEach(({ barIndex, markerBarIndex, timestamp, markerTimestamp, action, setupType, virtualBrick, metrics }) => {
         const evaluation = backtestResults.signal_set_3_evaluations?.find(
           ev => ev.barIndex === barIndex && ev.direction === action
         );
+        const aridETrade = backtestResults.arid_e_trades?.find(
+          trade =>
+            trade.markerBarIndex === markerBarIndex &&
+            trade.direction === action &&
+            trade.setupType === setupType
+        );
+        if (!aridETrade) return;
         merged.push({
           timestamp: markerTimestamp || timestamp,
           barIndex: Number.isInteger(markerBarIndex) ? markerBarIndex : barIndex,
@@ -620,48 +783,88 @@ export default function App() {
           action,
           isSystem: true,
           signalSet: 3,
+          setupType,
+          virtualBrick,
           metrics,
-          comment: 'No-tail arity trend resumption',
+          comment: setupType === 'synthetic'
+            ? 'No-tail synthetic arity entry'
+            : 'No-tail arity trend resumption',
           evaluationResult: evaluation ? evaluation.result : 'Open',
           profitBricks: evaluation?.profit_bricks,
+          aridETrade,
+        });
+      });
+    }
+
+    if (showMes3TrendTailSignals && activeChart === 'MES3' && backtestResults?.mes3_trend_tail_details) {
+      backtestResults.mes3_trend_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
+        const evaluation = backtestResults.mes3_trend_tail_evaluations?.find(
+          ev => ev.barIndex === barIndex && ev.direction === action
+        );
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          signalSet: 4,
+          setupType: 'mes3TrendTail',
+          metrics,
+          comment: 'MES3 8 EMA trend-tail signal',
+          evaluationResult: evaluation ? evaluation.result : 'Pending',
+        });
+      });
+    }
+
+    if (showMes3PreviousTailSignals && activeChart === 'MES3' && backtestResults?.mes3_previous_tail_details) {
+      backtestResults.mes3_previous_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
+        const evaluation = backtestResults.mes3_previous_tail_evaluations?.find(
+          ev => ev.barIndex === barIndex && ev.direction === action
+        );
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          signalSet: 5,
+          setupType: 'mes3PreviousTailRejection',
+          metrics,
+          comment: 'MES3 previous-bar tail rejection',
+          evaluationResult: evaluation ? evaluation.result : 'Pending',
         });
       });
     }
     
-    // 2. Add campaign trade markers (entries & exits)
-    if (showCampaignTrades && backtestResults?.campaign_results?.daily_reports) {
-      backtestResults.campaign_results.daily_reports.forEach(day => {
-        if (day.trades) {
-          day.trades.forEach((trade, idx) => {
-            // Campaign Entry Marker
-            merged.push({
-              timestamp: trade.entry_time,
-              barIndex: trade.entry_barIndex,
-              action: trade.direction,
-              isCampaignEntry: true,
-              tradeIndex: idx + 1,
-              comment: `Campaign trade entry #${idx+1}`,
-            });
-            
-            // Campaign Exit Marker
-            merged.push({
-              timestamp: trade.exit_time,
-              barIndex: trade.exit_barIndex,
-              action: trade.direction, // preserve direction for resolve
-              direction: trade.direction,
-              isCampaignExit: true,
-              exitResult: trade.result,
-              profitBricks: trade.profit_bricks,
-              tradeIndex: idx + 1,
-              comment: `Campaign trade exit #${idx+1} (${trade.result})`,
-            });
-          });
-        }
+    // 2. Add selected campaign trade markers (entries & exits) for the latest traded day.
+    if (showCampaignTrades) {
+      const selectedCampaign = CAMPAIGN_OPTIONS[campaignView] || CAMPAIGN_OPTIONS.yellowMomentum;
+      const reports = backtestResults?.[selectedCampaign.resultKey]?.daily_reports;
+      const latestDay = reports?.[reports.length - 1];
+      latestDay?.trades?.forEach((trade, idx) => {
+        merged.push({
+          timestamp: trade.entry_time,
+          barIndex: trade.entry_barIndex,
+          action: trade.direction,
+          [selectedCampaign.entryFlag]: true,
+          tradeIndex: idx + 1,
+          comment: `${selectedCampaign.label} entry #${idx + 1}`,
+        });
+
+        merged.push({
+          timestamp: trade.exit_time,
+          barIndex: trade.exit_barIndex,
+          action: trade.direction,
+          direction: trade.direction,
+          [selectedCampaign.exitFlag]: true,
+          exitResult: trade.result,
+          profitBricks: trade.profit_bricks,
+          tradeIndex: idx + 1,
+          comment: `${selectedCampaign.label} exit #${idx + 1} (${trade.result})`,
+        });
       });
     }
     
     return merged;
-  }, [currentAnnotations, backtestResults, showRawSignals, showSignalSet2, showSignalSet3, showCampaignTrades]);
+  }, [currentAnnotations, backtestResults, showTrainingAnnotations, showRawSignals, showSignalSet2, showSignalSet3, showMes3TrendTailSignals, showMes3PreviousTailSignals, showCampaignTrades, campaignView, activeChart, modalOpen]);
 
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
@@ -683,6 +886,10 @@ export default function App() {
     
     const campaign = backtestResults.campaign_results || {};
     const campaignSummary = campaign.summary || {};
+    const selectedCampaign = CAMPAIGN_OPTIONS[campaignView] || CAMPAIGN_OPTIONS.yellowMomentum;
+    const selectedCampaignResults = backtestResults[selectedCampaign.resultKey] || {};
+    const selectedCampaignSummary = selectedCampaignResults.summary || {};
+    const selectedCampaignRules = selectedCampaignResults.rules || {};
 
     return {
       totalSignals: evaluations.length,
@@ -701,8 +908,16 @@ export default function App() {
       campaignWinRate: campaignSummary.win_rate !== undefined ? campaignSummary.win_rate.toFixed(1) : '0.0',
       campaignAvgTime: campaignSummary.avg_success_time || 'N/A',
       campaignMaxDrawdown: campaignSummary.max_drawdown_bricks !== undefined ? campaignSummary.max_drawdown_bricks.toFixed(1) : '0.0',
+      selectedCampaignName: selectedCampaignResults.name || selectedCampaign.label,
+      selectedCampaignTrades: selectedCampaignSummary.total_trades || 0,
+      selectedCampaignWinningTrades: selectedCampaignSummary.winning_trades || 0,
+      selectedCampaignLosingTrades: selectedCampaignSummary.losing_trades || 0,
+      selectedCampaignTradeWinRate: selectedCampaignSummary.trade_win_rate !== undefined ? selectedCampaignSummary.trade_win_rate.toFixed(1) : '0.0',
+      selectedCampaignNet: selectedCampaignSummary.net_profit_bricks !== undefined ? selectedCampaignSummary.net_profit_bricks.toFixed(1) : '0.0',
+      selectedCampaignMaxDrawdown: selectedCampaignSummary.max_drawdown_bricks !== undefined ? selectedCampaignSummary.max_drawdown_bricks.toFixed(1) : '0.0',
+      selectedCampaignExit: selectedCampaignRules.exit || selectedCampaignRules.target || 'N/A',
     };
-  }, [backtestResults]);
+  }, [backtestResults, campaignView]);
 
   return (
     <div className="app-container">
@@ -718,10 +933,31 @@ export default function App() {
         </div>
       </header>
 
+      <button
+        type="button"
+        className="datasets-drawer-button"
+        onClick={() => setDatasetsDrawerOpen(true)}
+      >
+        Datasets
+      </button>
+
+      {datasetsDrawerOpen && (
+        <div className="datasets-drawer-backdrop" onClick={() => setDatasetsDrawerOpen(false)} />
+      )}
+
       {/* Sidebar */}
-      <aside className="app-sidebar">
+      <aside className={`app-sidebar ${datasetsDrawerOpen ? 'open' : ''}`}>
         <div>
-          <h3 className="section-title">Datasets</h3>
+          <div className="drawer-panel-header">
+            <h3 className="section-title" style={{ margin: 0 }}>Datasets</h3>
+            <button
+              type="button"
+              className="drawer-close-button"
+              onClick={() => setDatasetsDrawerOpen(false)}
+            >
+              Close
+            </button>
+          </div>
           {charts.length === 0 ? (
             <div style={{ fontSize: '13px', color: 'var(--text-muted)', textAlign: 'center', padding: '12px' }}>
               No charts imported yet.<br/>Export from MultiCharts to get started.
@@ -732,7 +968,10 @@ export default function App() {
                 <div
                   key={c}
                   className={`file-item ${activeChart === c ? 'active' : ''}`}
-                  onClick={() => setActiveChart(c)}
+                  onClick={() => {
+                    setActiveChart(c);
+                    setDatasetsDrawerOpen(false);
+                  }}
                 >
                   <span className="file-name">{c}</span>
                   <span className="file-meta">
@@ -910,9 +1149,32 @@ export default function App() {
 
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
                   <div style={{ color: 'var(--primary)', fontWeight: '600', marginBottom: '8px' }}>
-                    Signal Set 2: Arid Trend
+                    Signal Set 2: EMA Bounce
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Bounce Type</span><strong>{bounceType}</strong>
+                      </span>
+                      <select
+                        value={bounceType}
+                        onChange={(e) => setBounceType(e.target.value)}
+                        style={{
+                          width: '100%',
+                          height: '32px',
+                          marginTop: '4px',
+                          background: 'var(--bg-main)',
+                          color: 'var(--text-main)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '6px',
+                          padding: '0 8px',
+                        }}
+                      >
+                        <option value="green">Green bounces</option>
+                        <option value="yellow">Yellow bounces</option>
+                        <option value="all">All bounces</option>
+                      </select>
+                    </label>
                     <label>
                       <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
                         <span>Lookback</span><strong>{aridLookback} bars</strong>
@@ -921,7 +1183,7 @@ export default function App() {
                     </label>
                     <label>
                       <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Maximum Wick Overlap</span><strong>{aridMaxOverlap.toFixed(2)} bricks</strong>
+                        <span>Maximum Clumping</span><strong>{aridMaxOverlap.toFixed(2)} overlaps</strong>
                       </span>
                       <input type="range" min="0" max="1.5" step="0.05" value={aridMaxOverlap} onChange={(e) => setAridMaxOverlap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
                     </label>
@@ -939,10 +1201,104 @@ export default function App() {
                     </label>
                     <label>
                       <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Minimum EMA Separation</span><strong>{aridMinGap.toFixed(2)} bricks</strong>
+                        <span>Score Padding</span><strong>{aridMinGap.toFixed(2)}</strong>
                       </span>
                       <input type="range" min="0" max="3" step="0.25" value={aridMinGap} onChange={(e) => setAridMinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
                     </label>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+                  <div style={{ color: '#eab308', fontWeight: '600', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                    <span>Yellow Momentum 1:1</span>
+                    <button
+                      type="button"
+                      onClick={handleOptimizeYellowMomentum}
+                      disabled={optimizingYellowMomentum}
+                      style={{
+                        background: '#eab308',
+                        color: '#111827',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '4px 8px',
+                        fontSize: '11px',
+                        fontWeight: '700',
+                        cursor: optimizingYellowMomentum ? 'default' : 'pointer',
+                        opacity: optimizingYellowMomentum ? 0.65 : 1,
+                      }}
+                    >
+                      {optimizingYellowMomentum ? 'Optimizing...' : 'Optimize'}
+                    </button>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Slope Lookback</span><strong>{yellowSlopePeriod} bars</strong>
+                      </span>
+                      <input type="range" min="4" max="12" step="1" value={yellowSlopePeriod} onChange={(e) => setYellowSlopePeriod(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>5 EMA Steepness</span><strong>{yellowFastSlope.toFixed(1)} pt</strong>
+                      </span>
+                      <input type="range" min="10" max="50" step="1" value={yellowFastSlope} onChange={(e) => setYellowFastSlope(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>10 EMA Steepness</span><strong>{yellowSlowSlope.toFixed(1)} pt</strong>
+                      </span>
+                      <input type="range" min="8" max="45" step="1" value={yellowSlowSlope} onChange={(e) => setYellowSlowSlope(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>EMA Separation</span><strong>{yellowMinGap.toFixed(1)} pt</strong>
+                      </span>
+                      <input type="range" min="0" max="12" step="0.5" value={yellowMinGap} onChange={(e) => setYellowMinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Yellow Penetration</span><strong>{yellowMinPenetration.toFixed(1)} pt</strong>
+                      </span>
+                      <input type="range" min="0" max="8" step="0.5" value={yellowMinPenetration} onChange={(e) => setYellowMinPenetration(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Tail Length</span><strong>{yellowMinTail.toFixed(1)} pt</strong>
+                      </span>
+                      <input type="range" min="0" max="8" step="0.5" value={yellowMinTail} onChange={(e) => setYellowMinTail(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Arity Lookback</span><strong>{yellowArityLookback} bars</strong>
+                      </span>
+                      <input type="range" min="4" max="14" step="1" value={yellowArityLookback} onChange={(e) => setYellowArityLookback(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Maximum Clumping</span><strong>{yellowMaxOverlap.toFixed(2)}</strong>
+                      </span>
+                      <input type="range" min="0.35" max="1.4" step="0.05" value={yellowMaxOverlap} onChange={(e) => setYellowMaxOverlap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Maximum Reversals</span><strong>{yellowMaxReversals}</strong>
+                      </span>
+                      <input type="range" min="0" max="6" step="1" value={yellowMaxReversals} onChange={(e) => setYellowMaxReversals(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#eab308' }} />
+                    </label>
+                    {yellowOptimizationSummary && (
+                      <div style={{ color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '8px', lineHeight: '1.5' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Tested:</span>
+                          <strong>{yellowOptimizationSummary.tested_configs}</strong>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span>Best Net:</span>
+                          <strong style={{ color: (yellowOptimizationSummary.best_summary?.net_profit_bricks || 0) >= 0 ? '#10b981' : '#ef4444' }}>
+                            {(yellowOptimizationSummary.best_summary?.net_profit_bricks || 0).toFixed(1)} ranges
+                          </strong>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -975,14 +1331,53 @@ export default function App() {
                       </span>
                       <input type="range" min="0" max="3" step="0.25" value={set3MinGap} onChange={(e) => setSet3MinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
                     </label>
+                    <label>
+                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
+                        <span>Synthetic EMA Clearance</span><strong>{set3SyntheticMinGap.toFixed(2)} bricks</strong>
+                      </span>
+                      <input type="range" min="-1" max="4" step="0.25" value={set3SyntheticMinGap} onChange={(e) => setSet3SyntheticMinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
+                    </label>
                   </div>
                 </div>
 
                 {/* Exit Strategy Selector */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
                   <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Exit Strategy Permutation:</span>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginTop: '4px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'stepup' ? 'var(--primary)' : 'var(--text-secondary)' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
+                      <input 
+                        type="radio" 
+                        name="exitStrategy" 
+                        value="fixed" 
+                        checked={exitStrategy === 'fixed'} 
+                        onChange={() => setExitStrategy('fixed')} 
+                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                      />
+                      Fixed Target (Campaign 1)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed2' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
+                      <input 
+                        type="radio" 
+                        name="exitStrategy" 
+                        value="fixed2" 
+                        checked={exitStrategy === 'fixed2'} 
+                        onChange={() => setExitStrategy('fixed2')} 
+                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                      />
+                      Fixed Target 2 (Optimized)
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'trail' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
+                      <input 
+                        type="radio" 
+                        name="exitStrategy" 
+                        value="trail" 
+                        checked={exitStrategy === 'trail'} 
+                        onChange={() => setExitStrategy('trail')} 
+                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
+                      />
+                      Winners Run
+                    </label>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'stepup' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
                       <input 
                         type="radio" 
                         name="exitStrategy" 
@@ -993,36 +1388,22 @@ export default function App() {
                       />
                       Step Up on Loss
                     </label>
-                    <div style={{ display: 'flex', gap: '12px' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'trail' ? 'var(--primary)' : 'var(--text-secondary)' }}>
-                        <input 
-                          type="radio" 
-                          name="exitStrategy" 
-                          value="trail" 
-                          checked={exitStrategy === 'trail'} 
-                          onChange={() => setExitStrategy('trail')} 
-                          style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
-                        />
-                        Winners Run
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed' ? 'var(--primary)' : 'var(--text-secondary)' }}>
-                        <input 
-                          type="radio" 
-                          name="exitStrategy" 
-                          value="fixed" 
-                          checked={exitStrategy === 'fixed'} 
-                          onChange={() => setExitStrategy('fixed')} 
-                          style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
-                        />
-                        Fixed Target
-                      </label>
-                    </div>
                   </div>
                 </div>
 
                 {/* Chart Marker Filters */}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginTop: '6px' }}>
                   <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Chart Markers:</span>
+                  <label htmlFor="showTrainingAnnotations" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      id="showTrainingAnnotations"
+                      checked={showTrainingAnnotations}
+                      onChange={(e) => setShowTrainingAnnotations(e.target.checked)}
+                      style={{ accentColor: '#22c55e', cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                    Training Annotations ({currentAnnotations.length})
+                  </label>
                   <label htmlFor="showRawSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
                     <input
                       type="checkbox"
@@ -1041,7 +1422,7 @@ export default function App() {
                       onChange={(e) => setShowSignalSet2(e.target.checked)}
                       style={{ accentColor: '#0891b2', cursor: 'pointer', width: '16px', height: '16px' }}
                     />
-                    Arid Signal Set 2 ({backtestResults?.signal_set_2_details?.length || 0})
+                    EMA Bounce Set 2 ({backtestResults?.signal_set_2_details?.length || 0})
                   </label>
                   <label htmlFor="showSignalSet3" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
                     <input
@@ -1053,6 +1434,30 @@ export default function App() {
                     />
                     No-Tail Arity Set 3 ({backtestResults?.signal_set_3_details?.length || 0})
                   </label>
+                  {activeChart === 'MES3' && (
+                    <>
+                      <label htmlFor="showMes3PreviousTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                        <input
+                          type="checkbox"
+                          id="showMes3PreviousTailSignals"
+                          checked={showMes3PreviousTailSignals}
+                          onChange={(e) => setShowMes3PreviousTailSignals(e.target.checked)}
+                          style={{ accentColor: '#f59e0b', cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                        MES3 Prev-Bar Tail Rejections ({backtestResults?.mes3_previous_tail_details?.length || 0})
+                      </label>
+                      <label htmlFor="showMes3TrendTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                        <input
+                          type="checkbox"
+                          id="showMes3TrendTailSignals"
+                          checked={showMes3TrendTailSignals}
+                          onChange={(e) => setShowMes3TrendTailSignals(e.target.checked)}
+                          style={{ accentColor: '#f59e0b', cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                        MES3 8 EMA Trend-Tail ({backtestResults?.mes3_trend_tail_details?.length || 0})
+                      </label>
+                    </>
+                  )}
                   <label htmlFor="showCampaignTrades" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
                     <input
                       type="checkbox"
@@ -1062,6 +1467,26 @@ export default function App() {
                       style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
                     />
                     Campaign Trades and Outcomes
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '500' }}>
+                    <span>Campaign View</span>
+                    <select
+                      value={campaignView}
+                      onChange={(e) => setCampaignView(e.target.value)}
+                      style={{
+                        width: '100%',
+                        height: '32px',
+                        background: 'var(--bg-main)',
+                        color: 'var(--text-main)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '6px',
+                        padding: '0 8px',
+                      }}
+                    >
+                      {Object.entries(CAMPAIGN_OPTIONS).map(([value, option]) => (
+                        <option key={value} value={value}>{option.label}</option>
+                      ))}
+                    </select>
                   </label>
                 </div>
 
@@ -1151,7 +1576,9 @@ export default function App() {
                           ? 'Winners Run' 
                           : backtestResults?.campaign_results?.exit_strategy === 'stepup' 
                             ? 'Step Up on Loss' 
-                            : 'Fixed Target'}
+                            : backtestResults?.campaign_results?.exit_strategy === 'fixed2'
+                              ? 'Fixed Target 2 (Optimized)'
+                              : 'Fixed Target (Campaign 1)'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1159,7 +1586,7 @@ export default function App() {
                       <span style={{ fontWeight: '600' }}>{stats.campaignTotalDays} days</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Winning Days (+2):</span>
+                      <span style={{ color: 'var(--text-secondary)' }}>Winning Days (+{backtestResults?.campaign_results?.summary?.target_bricks || 2.0}):</span>
                       <span style={{ fontWeight: '600', color: '#10b981' }}>{stats.campaignWinningDays} ({stats.campaignWinRate}%)</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -1173,6 +1600,42 @@ export default function App() {
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Max Drawdown:</span>
                       <span style={{ fontWeight: '600', color: parseFloat(stats.campaignMaxDrawdown) < 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.campaignMaxDrawdown} bricks</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
+                  <h4 style={{ color: campaignView === 'yellowMomentum' ? '#eab308' : '#0891b2', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span>↗</span> {stats.selectedCampaignName}
+                  </h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Selected View:</span>
+                      <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{CAMPAIGN_OPTIONS[campaignView]?.label || 'Yellow Momentum 1:1'}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Exit:</span>
+                      <span style={{ fontWeight: '600', color: 'var(--text-main)', textAlign: 'right' }}>{stats.selectedCampaignExit}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Trades:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.selectedCampaignTrades}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Wins / Losses:</span>
+                      <span style={{ fontWeight: '600' }}>{stats.selectedCampaignWinningTrades}W - {stats.selectedCampaignLosingTrades}L</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Trade Win Rate:</span>
+                      <span style={{ fontWeight: '600', color: parseFloat(stats.selectedCampaignTradeWinRate) >= 40 ? '#10b981' : '#ef4444' }}>{stats.selectedCampaignTradeWinRate}%</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Net:</span>
+                      <span style={{ fontWeight: '600', color: parseFloat(stats.selectedCampaignNet) >= 0 ? '#10b981' : '#ef4444' }}>{stats.selectedCampaignNet} ranges</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Max Drawdown:</span>
+                      <span style={{ fontWeight: '600', color: parseFloat(stats.selectedCampaignMaxDrawdown) < 0 ? '#ef4444' : 'var(--text-secondary)' }}>{stats.selectedCampaignMaxDrawdown} ranges</span>
                     </div>
                   </div>
                 </div>
@@ -1195,10 +1658,21 @@ export default function App() {
               <div className="floating-info">
                 <h4>{activeChart}</h4>
                 <div>Bricks: {chartData.length}</div>
+                {activeChart === 'MES3' && secondaryChartData.length > 0 && (
+                  <div>HA 2s Bars: {secondaryChartData.length}</div>
+                )}
                 <div style={{ color: 'var(--text-secondary)' }}>Click on any Renko brick body or wick to add/edit annotations.</div>
               </div>
+              <button
+                type="button"
+                className="annotations-drawer-button"
+                onClick={() => setAnnotationsDrawerOpen(true)}
+              >
+                Annotations ({currentAnnotations.length})
+              </button>
               <ChartComponent
                 data={chartData}
+                secondaryData={activeChart === 'MES3' ? secondaryChartData : []}
                 annotations={mergedAnnotations}
                 onBrickClick={handleBrickClick}
                 bookmark={bookmark}
@@ -1215,78 +1689,97 @@ export default function App() {
           )}
         </div>
 
-        {/* Annotations Log Panel */}
-        <section className="details-panel">
-          <div className="panel-header">
-            <h3 className="section-title" style={{ margin: 0 }}>Annotations Log</h3>
-            <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              Total Marked: {currentAnnotations.length}
-            </span>
-          </div>
-
-          <div style={{ overflowY: 'auto', flex: 1 }}>
-            {currentAnnotations.length === 0 ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                No annotations added to this dataset yet. Click on the chart to start training the algorithm.
-              </div>
-            ) : (
-              <table className="annotations-table">
-                <thead>
-                  <tr>
-                    <th>Timestamp (ISO)</th>
-                    <th>Action</th>
-                    <th>Open</th>
-                    <th>High</th>
-                    <th>Low</th>
-                    <th>Close</th>
-                    <th>EMA</th>
-                    <th>Comments / Notes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentAnnotations.map((ann, i) => (
-                    <tr
-                      key={i}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => {
-                        // Find matching brick in chartData
-                        const indexedBrick = Number.isInteger(ann.barIndex) ? chartData[ann.barIndex] : null;
-                        const brick = indexedBrick || chartData.find(d =>
-                          d.time === ann.timestamp && metricsMatchBrick(ann.metrics, d)
-                        );
-                        if (brick) {
-                          handleBrickClick({
-                            ...brick,
-                            originalTime: brick.time,
-                            originalIndex: ann.barIndex ?? chartData.indexOf(brick),
-                          });
-                        }
-                      }}
-                    >
-                      <td style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
-                        {ann.timestamp}
-                      </td>
-                      <td>
-                        <span className={`badge ${ann.action.toLowerCase()}`}>
-                          {ann.action.toUpperCase()}
-                        </span>
-                      </td>
-                      <td>{ann.metrics?.open?.toFixed(2)}</td>
-                      <td>{ann.metrics?.high?.toFixed(2)}</td>
-                      <td>{ann.metrics?.low?.toFixed(2)}</td>
-                      <td>{ann.metrics?.close?.toFixed(2)}</td>
-                      <td>{ann.metrics?.ema?.toFixed(4)}</td>
-                      <td style={{ color: 'var(--text-secondary)', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {ann.comment}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
       </main>
+
+      {annotationsDrawerOpen && (
+        <div className="annotations-drawer-backdrop" onClick={() => setAnnotationsDrawerOpen(false)}>
+          <aside className="annotations-drawer" onClick={event => event.stopPropagation()}>
+            <div className="panel-header">
+              <div>
+                <h3 className="section-title" style={{ margin: 0 }}>Annotations Log</h3>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  Total Marked: {currentAnnotations.length}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="drawer-close-button"
+                onClick={() => setAnnotationsDrawerOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {currentAnnotations.length === 0 ? (
+                <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
+                  No annotations added to this dataset yet. Click on the chart to start training the algorithm.
+                </div>
+              ) : (
+                <table className="annotations-table">
+                  <thead>
+                    <tr>
+                      <th>Timestamp (ISO)</th>
+                      <th>Set</th>
+                      <th>Action</th>
+                      <th>Open</th>
+                      <th>High</th>
+                      <th>Low</th>
+                      <th>Close</th>
+                      <th>EMA</th>
+                      <th>Comments / Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentAnnotations.map((ann, i) => (
+                      <tr
+                        key={i}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => {
+                          const indexedBrick = Number.isInteger(ann.barIndex) ? chartData[ann.barIndex] : null;
+                          const brick = indexedBrick || chartData.find(d =>
+                            d.time === ann.timestamp && metricsMatchBrick(ann.metrics, d)
+                          );
+                          if (brick) {
+                            setAnnotationsDrawerOpen(false);
+                            handleBrickClick({
+                              ...brick,
+                              originalTime: brick.time,
+                              originalIndex: ann.barIndex ?? chartData.indexOf(brick),
+                            });
+                          }
+                        }}
+                      >
+                        <td style={{ color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                          {ann.timestamp}
+                        </td>
+                        <td>
+                          <span className="badge marker-set">
+                            {ann.markerSet || defaultMarkerSetForChart(activeChart)}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${ann.action.toLowerCase()}`}>
+                            {ann.action.toUpperCase()}
+                          </span>
+                        </td>
+                        <td>{ann.metrics?.open?.toFixed(2)}</td>
+                        <td>{ann.metrics?.high?.toFixed(2)}</td>
+                        <td>{ann.metrics?.low?.toFixed(2)}</td>
+                        <td>{ann.metrics?.close?.toFixed(2)}</td>
+                        <td>{ann.metrics?.ema?.toFixed(4)}</td>
+                        <td style={{ color: 'var(--text-secondary)', maxWidth: '280px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {ann.comment}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
 
       {/* Annotation Modal Popup (Modeless & Draggable) */}
       {modalOpen && selectedBrick && (
@@ -1379,12 +1872,30 @@ export default function App() {
                 <span className="stat-label">Close</span>
                 <span className="stat-value">{selectedBrick.close.toFixed(2)}</span>
               </div>
-              <div className="stat-item" style={{ gridColumn: 'span 2' }}>
-                <span className="stat-label">8 EMA</span>
+              <div className="stat-item">
+                <span className="stat-label">5 EMA</span>
                 <span className="stat-value" style={{ color: 'var(--primary)' }}>
-                  {selectedBrick.ema ? selectedBrick.ema.toFixed(4) : 'N/A'}
+                  {(selectedBrick.ema5 ?? selectedBrick.ema) ? (selectedBrick.ema5 ?? selectedBrick.ema).toFixed(4) : 'N/A'}
                 </span>
               </div>
+              <div className="stat-item">
+                <span className="stat-label">10 EMA</span>
+                <span className="stat-value" style={{ color: '#008000' }}>
+                  {selectedBrick.ema10 ? selectedBrick.ema10.toFixed(4) : 'N/A'}
+                </span>
+              </div>
+            </div>
+
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: '500', marginBottom: '6px' }}>Marker Set:</div>
+              <select
+                className="marker-set-select"
+                value={selectedMarkerSet || defaultMarkerSetForChart(activeChart)}
+                onChange={e => setSelectedMarkerSet(e.target.value)}
+              >
+                <option value={RAW_RANGE_MARKER_SET}>{RAW_RANGE_MARKER_SET}</option>
+                <option value="Training Set">Training Set</option>
+              </select>
             </div>
 
             <div>

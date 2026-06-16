@@ -213,5 +213,621 @@
         "ema": 30018.9716
       }
     }
+  ],
+  "MYM_10tick_Range_5EMA_10EMA": [
+    {
+      "timestamp": "2026-06-15T06:31:14",
+      "barIndex": 1723,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This is a good yellow bar bounce.",
+      "metrics": {
+        "open": 51881,
+        "high": 51883,
+        "low": 51873,
+        "close": 51873,
+        "ema": 51880.2452,
+        "ema5": 51880.2452,
+        "ema10": 51887.253
+      }
+    },
+    {
+      "timestamp": "2026-06-15T06:32:01",
+      "barIndex": 1747,
+      "action": "Skip",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This is a signal in a congested set of bars with no arity.",
+      "metrics": {
+        "open": 51868,
+        "high": 51872,
+        "low": 51862,
+        "close": 51862,
+        "ema": 51869.2475,
+        "ema5": 51869.2475,
+        "ema10": 51874.151
+      }
+    },
+    {
+      "timestamp": "2026-06-15T06:40:20",
+      "barIndex": 1867,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This is an extremely strongly trending market with both the yellow and moving averages' slopes being very strong and we see a clear pin bar on the yellow.",
+      "metrics": {
+        "open": 51851,
+        "high": 51861,
+        "low": 51851,
+        "close": 51851,
+        "ema": 51858.9214,
+        "ema5": 51858.9214,
+        "ema10": 51866.055
+      }
+    },
+    {
+      "timestamp": "2026-06-15T06:40:49",
+      "barIndex": 1877,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This is what I call a yellow pin bar trade where we have a tail sticking up through a stuck sharply slanting yellow MA.",
+      "metrics": {
+        "open": 51805,
+        "high": 51809,
+        "low": 51799,
+        "close": 51799,
+        "ema": 51805.9833,
+        "ema5": 51805.9833,
+        "ema10": 51817.2039
+      }
+    },
+    {
+      "timestamp": "2026-06-15T06:46:48",
+      "barIndex": 1945,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 51767,
+        "high": 51773,
+        "low": 51763,
+        "close": 51763,
+        "ema": 51768.2988,
+        "ema5": 51768.2988,
+        "ema10": 51775.1544
+      }
+    },
+    {
+      "timestamp": "2026-06-15T06:54:18",
+      "barIndex": 2016,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This is a nice green bar bounce with good arity. The bars are not plumped here.",
+      "metrics": {
+        "open": 51813,
+        "high": 51820,
+        "low": 51810,
+        "close": 51820,
+        "ema": 51817.9046,
+        "ema5": 51817.9046,
+        "ema10": 51813.0795
+      }
+    },
+    {
+      "timestamp": "2026-06-15T06:55:22",
+      "barIndex": 2023,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Another yellow pin bar grade. Good air, do you know clumping? ",
+      "metrics": {
+        "open": 51851,
+        "high": 51859,
+        "low": 51849,
+        "close": 51859,
+        "ema": 51851.502,
+        "ema5": 51851.502,
+        "ema10": 51841.7359
+      }
+    },
+    {
+      "timestamp": "2026-06-15T07:03:58",
+      "barIndex": 2087,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "A decent green bar bounce with the tail",
+      "metrics": {
+        "open": 51840,
+        "high": 51845,
+        "low": 51835,
+        "close": 51845,
+        "ema": 51839.8095,
+        "ema5": 51839.8095,
+        "ema10": 51835.362
+      }
+    },
+    {
+      "timestamp": "2026-06-15T07:11:56",
+      "barIndex": 2143,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 51782,
+        "high": 51785,
+        "low": 51775,
+        "close": 51775,
+        "ema": 51782.5967,
+        "ema5": 51782.5967,
+        "ema10": 51787.3342
+      }
+    },
+    {
+      "timestamp": "2026-06-15T07:12:57",
+      "barIndex": 2149,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "A decent pin bar bounce.",
+      "metrics": {
+        "open": 51762,
+        "high": 51764,
+        "low": 51754,
+        "close": 51754,
+        "ema": 51760.9138,
+        "ema5": 51760.9138,
+        "ema10": 51768.7192
+      }
+    },
+    {
+      "timestamp": "2026-06-15T07:19:09",
+      "barIndex": 2189,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 51819,
+        "high": 51824,
+        "low": 51814,
+        "close": 51824,
+        "ema": 51817.035,
+        "ema5": 51817.035,
+        "ema10": 51806.4257
+      }
+    },
+    {
+      "timestamp": "2026-06-15T07:31:26",
+      "barIndex": 2250,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Good green bar bounce, even though it didn't work out.",
+      "metrics": {
+        "open": 51818,
+        "high": 51825,
+        "low": 51815,
+        "close": 51815,
+        "ema": 51817.8297,
+        "ema5": 51817.8297,
+        "ema10": 51823.6964
+      }
+    },
+    {
+      "timestamp": "2026-06-15T07:45:59",
+      "barIndex": 2311,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "A missed yellow bounce that didn't work out.",
+      "metrics": {
+        "open": 51879,
+        "high": 51883,
+        "low": 51873,
+        "close": 51883,
+        "ema": 51876.8726,
+        "ema5": 51876.8726,
+        "ema10": 51868.315
+      }
+    },
+    {
+      "timestamp": "2026-06-15T08:49:50",
+      "barIndex": 2490,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 51933,
+        "high": 51943,
+        "low": 51933,
+        "close": 51943,
+        "ema": 51938.9179,
+        "ema5": 51938.9179,
+        "ema10": 51934.3194
+      }
+    },
+    {
+      "timestamp": "2026-06-15T09:23:50",
+      "barIndex": 2551,
+      "action": "Skip",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Arid on the signal.",
+      "metrics": {
+        "open": 51968,
+        "high": 51977,
+        "low": 51967,
+        "close": 51977,
+        "ema": 51973.7547,
+        "ema5": 51973.7547,
+        "ema10": 51971.6165
+      }
+    },
+    {
+      "timestamp": "2026-06-15T09:41:24",
+      "barIndex": 2571,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Good pin bar with Arid but it didn't work out.",
+      "metrics": {
+        "open": 51946,
+        "high": 51952,
+        "low": 51942,
+        "close": 51942,
+        "ema": 51947.456,
+        "ema5": 51947.456,
+        "ema10": 51955.2958
+      }
+    },
+    {
+      "timestamp": "2026-06-15T10:20:25",
+      "barIndex": 2634,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 51965,
+        "high": 51972,
+        "low": 51962,
+        "close": 51972,
+        "ema": 51968.5395,
+        "ema5": 51968.5395,
+        "ema10": 51961.5247
+      }
+    },
+    {
+      "timestamp": "2026-06-15T10:47:23",
+      "barIndex": 2661,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "The decent yellow bar bounds",
+      "metrics": {
+        "open": 51928,
+        "high": 51929,
+        "low": 51919,
+        "close": 51919,
+        "ema": 51927.1158,
+        "ema5": 51927.1158,
+        "ema10": 51935.1951
+      }
+    },
+    {
+      "timestamp": "2026-06-15T10:50:06",
+      "barIndex": 2664,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "On this yellow bounce",
+      "metrics": {
+        "open": 51918,
+        "high": 51920,
+        "low": 51910,
+        "close": 51910,
+        "ema": 51916.4788,
+        "ema5": 51916.4788,
+        "ema10": 51924.7192
+      }
+    },
+    {
+      "timestamp": "2026-06-15T10:57:18",
+      "barIndex": 2675,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Another very nice missed green bounce trade.",
+      "metrics": {
+        "open": 51887,
+        "high": 51891,
+        "low": 51881,
+        "close": 51881,
+        "ema": 51886.0863,
+        "ema5": 51886.0863,
+        "ema10": 51893.1535
+      }
+    },
+    {
+      "timestamp": "2026-06-15T10:59:02",
+      "barIndex": 2677,
+      "action": "Skip",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This is starting to clump and not enough arity if you look left on this signal.",
+      "metrics": {
+        "open": 51876,
+        "high": 51885,
+        "low": 51875,
+        "close": 51875,
+        "ema": 51880.3717,
+        "ema5": 51880.3717,
+        "ema10": 51887.4498
+      }
+    },
+    {
+      "timestamp": "2026-06-15T11:03:04",
+      "barIndex": 2688,
+      "action": "Skip",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Too much clumping on this signal if you look left. Not enough arity.",
+      "metrics": {
+        "open": 51855,
+        "high": 51859,
+        "low": 51849,
+        "close": 51849,
+        "ema": 51853.4717,
+        "ema5": 51853.4717,
+        "ema10": 51860.4366
+      }
+    },
+    {
+      "timestamp": "2026-06-15T11:29:15",
+      "barIndex": 2723,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This is another mist, very nice yellow pin bar trade.",
+      "metrics": {
+        "open": 51844,
+        "high": 51853,
+        "low": 51843,
+        "close": 51843,
+        "ema": 51850.2157,
+        "ema5": 51850.2157,
+        "ema10": 51856.4707
+      }
+    },
+    {
+      "timestamp": "2026-06-15T12:00:18",
+      "barIndex": 2767,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "This was a nice green bar bounce here.",
+      "metrics": {
+        "open": 51836,
+        "high": 51841,
+        "low": 51831,
+        "close": 51831,
+        "ema": 51835.4856,
+        "ema5": 51835.4856,
+        "ema10": 51840.1438
+      }
+    },
+    {
+      "timestamp": "2026-06-15T12:52:12",
+      "barIndex": 2866,
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 51786,
+        "high": 51788,
+        "low": 51778,
+        "close": 51778,
+        "ema": 51780.5367,
+        "ema5": 51780.5367,
+        "ema10": 51786.2873
+      },
+      "markerSet": "Raw Range Bar Set"
+    },
+    {
+      "timestamp": "2026-06-15T12:54:51",
+      "barIndex": 2871,
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 51762,
+        "high": 51770,
+        "low": 51760,
+        "close": 51760,
+        "ema": 51764.9843,
+        "ema5": 51764.9843,
+        "ema10": 51772.0905
+      },
+      "markerSet": "Raw Range Bar Set"
+    },
+    {
+      "timestamp": "2026-06-15T12:55:38",
+      "barIndex": 2879,
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 51741,
+        "high": 51742,
+        "low": 51732,
+        "close": 51732,
+        "ema": 51738.9172,
+        "ema5": 51738.9172,
+        "ema10": 51747.1549
+      },
+      "markerSet": "Raw Range Bar Set"
+    },
+    {
+      "timestamp": "2026-06-15T12:57:15",
+      "barIndex": 2885,
+      "action": "Sell",
+      "comment": "",
+      "metrics": {
+        "open": 51732,
+        "high": 51732,
+        "low": 51722,
+        "close": 51722,
+        "ema": 51725.6498,
+        "ema5": 51725.6498,
+        "ema10": 51731.0477
+      },
+      "markerSet": "Raw Range Bar Set"
+    },
+    {
+      "timestamp": "2026-06-15T12:59:58",
+      "barIndex": 2910,
+      "action": "Buy",
+      "comment": "",
+      "metrics": {
+        "open": 51746,
+        "high": 51751,
+        "low": 51741,
+        "close": 51751,
+        "ema": 51745.3095,
+        "ema5": 51745.3095,
+        "ema10": 51739.6731
+      },
+      "markerSet": "Raw Range Bar Set"
+    },
+    {
+      "timestamp": "2026-06-15T16:01:03",
+      "barIndex": 2996,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Missed a good yellow pin bar bounce here.",
+      "metrics": {
+        "open": 51723,
+        "high": 51726,
+        "low": 51716,
+        "close": 51716,
+        "ema": 51722.3303,
+        "ema5": 51722.3303,
+        "ema10": 51726.5153
+      }
+    },
+    {
+      "timestamp": "2026-06-15T16:12:22",
+      "barIndex": 2999,
+      "action": "Skip",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Not poking through the yellow moving average enough",
+      "metrics": {
+        "open": 51702,
+        "high": 51710,
+        "low": 51700,
+        "close": 51700,
+        "ema": 51708.9127,
+        "ema5": 51708.9127,
+        "ema10": 51716.3078
+      }
+    },
+    {
+      "timestamp": "2026-06-15T17:15:29",
+      "barIndex": 3026,
+      "action": "Skip",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Bad signal, no Arid.",
+      "metrics": {
+        "open": 51722,
+        "high": 51731,
+        "low": 51721,
+        "close": 51731,
+        "ema": 51725.81,
+        "ema5": 51725.81,
+        "ema10": 51723.0513
+      }
+    },
+    {
+      "timestamp": "2026-06-15T18:08:11",
+      "barIndex": 3054,
+      "action": "Skip",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Why are you generating a buy here when both moving averages are relatively flat and not separated?",
+      "metrics": {
+        "open": 51738,
+        "high": 51746,
+        "low": 51736,
+        "close": 51746,
+        "ema": 51742.8914,
+        "ema5": 51742.8914,
+        "ema10": 51740.3971
+      }
+    }
+  ],
+  "MES3": [
+    {
+      "timestamp": "2026-06-15T12:59:58",
+      "barIndex": 88060,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Strongly trending market with a large tail.",
+      "metrics": {
+        "open": 7562,
+        "high": 7562.75,
+        "low": 7561,
+        "close": 7562.75,
+        "ema": 7561.0418
+      }
+    },
+    {
+      "timestamp": "2026-06-15T15:12:51",
+      "barIndex": 88116,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Fairly long tail under a sharply declining M.A.",
+      "metrics": {
+        "open": 7556,
+        "high": 7556.75,
+        "low": 7555.25,
+        "close": 7555.25,
+        "ema": 7557.3769
+      }
+    },
+    {
+      "timestamp": "2026-06-15T20:33:02",
+      "barIndex": 88322,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Strongly trending market with a large tail.",
+      "metrics": {
+        "open": 7556.75,
+        "high": 7557.5,
+        "low": 7555.75,
+        "close": 7557.5,
+        "ema": 7556.16
+      }
+    },
+    {
+      "timestamp": "2026-06-15T22:10:20",
+      "barIndex": 88360,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Strongly trending market with a large tail.",
+      "metrics": {
+        "open": 7556.75,
+        "high": 7557.5,
+        "low": 7555.75,
+        "close": 7557.5,
+        "ema": 7555.4184
+      }
+    },
+    {
+      "timestamp": "2026-06-16T00:49:13",
+      "barIndex": 88437,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Trending market with a large tail",
+      "metrics": {
+        "open": 7556.75,
+        "high": 7557.75,
+        "low": 7556,
+        "close": 7556,
+        "ema": 7558.1968
+      }
+    },
+    {
+      "timestamp": "2026-06-16T01:07:08",
+      "barIndex": 88449,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "Strongly trending market with a large tail.",
+      "metrics": {
+        "open": 7562,
+        "high": 7562.75,
+        "low": 7560.75,
+        "close": 7562.75,
+        "ema": 7560.6722
+      }
+    }
   ]
 }

@@ -2,6 +2,7 @@ import os
 import json
 import argparse
 from datetime import datetime
+from itertools import product
 
 # Default configuration settings for the strategy
 DEFAULT_CONFIG = {
@@ -18,16 +19,55 @@ DEFAULT_CONFIG = {
     "start_time": "06:31:00",       # Skip the first minute after the session open
     "end_time": "11:00:00",         # End of daily trading window (PST)
     "arid_lookback": 8,
-    "arid_max_overlap_bricks": 0.5,
-    "arid_max_reversals": 1,
-    "arid_ema_slope_period": 5,
-    "arid_ema_slope_threshold": 4.0,
+    "arid_max_overlap_bricks": 0.95,
+    "arid_max_reversals": 5,
+    "arid_ema_slope_period": 8,
+    "arid_ema_slope_threshold": 10.0,
     "arid_min_ema_gap_bricks": 0.5,
+    "bounce_near_ema_tolerance": 3.0,
+    "bounce_min_tail": 1.0,
+    "bounce_min_ema_gap": 4.0,
+    "bounce_max_left_overlap": 0.56,
+    "bounce_min_yellow_penetration": 1.75,
+    "ema_bounce_stop_buffer_ticks": 2,
+    "ema_bounce_max_stop_ticks": 15,
+    "yellow_momentum_slope_period": 8,
+    "yellow_momentum_fast_slope_threshold": 30.0,
+    "yellow_momentum_slow_slope_threshold": 25.0,
+    "yellow_momentum_min_ema_gap": 4.0,
+    "yellow_momentum_min_penetration": 1.5,
+    "yellow_momentum_min_tail": 1.0,
+    "yellow_momentum_arity_lookback": 8,
+    "yellow_momentum_max_overlap": 0.95,
+    "yellow_momentum_max_reversals": 5,
+    "mes3_ema_slope_period": 8,
+    "mes3_ema_slope_threshold": 2.2,
+    "mes3_short_slope_period": 3,
+    "mes3_short_slope_threshold": 0.7,
+    "mes3_min_tail": 0.75,
+    "mes3_min_close_ema_distance": 1.0,
+    "mes3_arity_lookback": 8,
+    "mes3_max_overlap": 1.0,
+    "mes3_max_reversals": 4,
+    "mes3_cooldown_bars": 3,
+    "mes3_prev_tail_slope_period": 8,
+    "mes3_prev_tail_slope_threshold": 2.5,
+    "mes3_prev_tail_short_slope_period": 3,
+    "mes3_prev_tail_short_slope_threshold": 0.9,
+    "mes3_prev_tail_min_tail": 0.75,
+    "mes3_prev_tail_extension_ticks": 1,
+    "mes3_prev_tail_min_close_ema_distance": 1.0,
+    "mes3_prev_tail_arity_lookback": 8,
+    "mes3_prev_tail_max_overlap": 1.0,
+    "mes3_prev_tail_max_reversals": 4,
+    "mes3_prev_tail_cooldown_bars": 3,
     "set3_left_lookback": 8,
     "set3_max_left_overlaps": 1,
     "set3_ema_slope_period": 5,
     "set3_ema_slope_threshold": 4.0,
     "set3_min_ema_gap_bricks": 0.5,
+    "set3_synthetic_min_ema_gap_bricks": -0.25,
+    "set3_min_prior_brick_seconds": 3,
 }
 
 def load_json_data(file_path):
@@ -104,6 +144,576 @@ def evaluate_signal_details(data, signal_details, config):
         evaluations.append(evaluation)
 
     return evaluations
+
+def get_fast_ema(bar):
+    return bar.get("ema5", bar.get("ema"))
+
+def get_slow_ema(bar):
+    fast_ema = get_fast_ema(bar)
+    return bar.get("ema10", fast_ema)
+
+def calculate_arity_metrics(data, index, lookback):
+    recent = data[max(0, index - lookback + 1):index + 1]
+    if len(recent) < 2:
+        return 0.0, 0
+
+    body_sizes = [
+        abs(bar["close"] - bar["open"])
+        for bar in recent
+        if abs(bar["close"] - bar["open"]) > 0
+    ]
+    reference_body = sum(body_sizes) / len(body_sizes) if body_sizes else 1.0
+
+    overlap_values = []
+    for previous, current in zip(recent, recent[1:]):
+        overlap = max(
+            0.0,
+            min(previous["high"], current["high"]) - max(previous["low"], current["low"])
+        )
+        overlap_values.append(overlap / reference_body if reference_body else 0.0)
+
+    directions = [
+        1 if bar["close"] > bar["open"] else -1 if bar["close"] < bar["open"] else 0
+        for bar in recent
+    ]
+    reversals = sum(
+        previous != 0 and current != 0 and previous != current
+        for previous, current in zip(directions, directions[1:])
+    )
+
+    average_overlap = sum(overlap_values) / len(overlap_values) if overlap_values else 0.0
+    return average_overlap, reversals
+
+def calculate_left_range_overlap(data, index, lookback):
+    current = data[index]
+    previous_bars = data[max(0, index - lookback):index]
+    if not previous_bars:
+        return 0.0, 0
+
+    body_sizes = [
+        abs(bar["close"] - bar["open"])
+        for bar in previous_bars + [current]
+        if abs(bar["close"] - bar["open"]) > 0
+    ]
+    reference_body = sum(body_sizes) / len(body_sizes) if body_sizes else 1.0
+
+    overlap_values = []
+    overlap_count = 0
+    for previous in previous_bars:
+        overlap = max(
+            0.0,
+            min(current["high"], previous["high"]) - max(current["low"], previous["low"])
+        )
+        if overlap > 0:
+            overlap_count += 1
+        overlap_values.append(overlap / reference_body if reference_body else 0.0)
+
+    average_overlap = sum(overlap_values) / len(overlap_values) if overlap_values else 0.0
+    return average_overlap, overlap_count
+
+def run_ema_bounce_strategy(data, config):
+    signal_details = []
+    bounce_type_filter = config.get("bounce_type_filter", "all")
+    lookback = max(3, config["arid_lookback"])
+    slope_period = max(1, config.get("arid_ema_slope_period", lookback))
+    slope_threshold = config["arid_ema_slope_threshold"]
+    slow_slope_ratio = 0.55
+    short_slope_period = 3
+    near_ema_tolerance = config.get("bounce_near_ema_tolerance", 3.0)
+    min_tail = config.get("bounce_min_tail", 1.0)
+    min_ema_gap = config.get("bounce_min_ema_gap", 4.5)
+    max_left_overlap = config.get("bounce_max_left_overlap", 0.56)
+    min_yellow_penetration = config.get("bounce_min_yellow_penetration", 2.0)
+    min_score = 3.0 + config.get("arid_min_ema_gap_bricks", 0.5)
+    max_overlap = config["arid_max_overlap_bricks"]
+    max_reversals = config["arid_max_reversals"]
+    start_index = max(lookback, slope_period, short_slope_period)
+
+    for i in range(start_index, len(data)):
+        current = data[i]
+        o, h, l, c = current["open"], current["high"], current["low"], current["close"]
+
+        fast_ema = get_fast_ema(current)
+        slow_ema = get_slow_ema(current)
+        previous_fast = get_fast_ema(data[i - slope_period])
+        previous_slow = get_slow_ema(data[i - slope_period])
+        short_previous_fast = get_fast_ema(data[i - short_slope_period])
+        short_previous_slow = get_slow_ema(data[i - short_slope_period])
+        if None in (fast_ema, slow_ema, previous_fast, previous_slow, short_previous_fast, short_previous_slow):
+            continue
+        if abs(fast_ema - slow_ema) < min_ema_gap:
+            continue
+
+        fast_slope = fast_ema - previous_fast
+        slow_slope = slow_ema - previous_slow
+        short_fast_slope = fast_ema - short_previous_fast
+        short_slow_slope = slow_ema - short_previous_slow
+        average_overlap, reversals = calculate_arity_metrics(data, i, lookback)
+        left_range_overlap, left_range_overlap_count = calculate_left_range_overlap(data, i, lookback)
+        if average_overlap > max_overlap or reversals > max_reversals:
+            continue
+        is_up = c > o
+        is_down = c < o
+        lower_tail = min(o, c) - l
+        upper_tail = h - max(o, c)
+        rejection_tail = lower_tail if c > o else upper_tail
+        strict_green_cross = (
+            is_up and l <= slow_ema and c > slow_ema
+            or is_down and h >= slow_ema and c < slow_ema
+        )
+        strong_strict_green_override = strict_green_cross and (
+            rejection_tail >= 5.0 or
+            (abs(fast_slope) + abs(slow_slope)) / 2.0 >= 17.0
+        )
+        if left_range_overlap > max_left_overlap and not strong_strict_green_override:
+            continue
+        if abs(fast_ema - slow_ema) < 5.0 and left_range_overlap > 0.48 and not strong_strict_green_override:
+            continue
+
+        bullish_trend = (
+            fast_ema >= slow_ema and
+            (
+                fast_slope >= slope_threshold and slow_slope >= slope_threshold * slow_slope_ratio
+                or short_fast_slope >= slope_threshold * 0.6 and short_slow_slope >= slope_threshold * 0.4
+            )
+        )
+        bearish_trend = (
+            fast_ema <= slow_ema and
+            (
+                fast_slope <= -slope_threshold and slow_slope <= -slope_threshold * slow_slope_ratio
+                or short_fast_slope <= -slope_threshold * 0.6 and short_slow_slope <= -slope_threshold * 0.4
+            )
+        )
+
+        yellow_buy = (
+            is_up and bullish_trend and
+            l <= fast_ema and c > fast_ema and
+            fast_ema - l >= min_yellow_penetration and
+            (lower_tail >= min_tail or min(o, c) <= fast_ema)
+        )
+        yellow_sell = (
+            (is_down or c == o) and bearish_trend and
+            h >= fast_ema and c < fast_ema and
+            h - fast_ema >= min_yellow_penetration and
+            (upper_tail >= min_tail or max(o, c) >= fast_ema)
+        )
+        green_buy = is_up and bullish_trend and l <= slow_ema + near_ema_tolerance and c > slow_ema
+        green_sell = is_down and bearish_trend and h >= slow_ema - near_ema_tolerance and c < slow_ema
+
+        action = None
+        bounce_type = None
+        if green_buy or yellow_buy:
+            action = "Buy"
+            bounce_type = "green" if green_buy else "yellow"
+        elif green_sell or yellow_sell:
+            action = "Sell"
+            bounce_type = "green" if green_sell else "yellow"
+        if action is None:
+            continue
+        if bounce_type_filter != "all" and bounce_type != bounce_type_filter:
+            continue
+
+        slope_strength = (abs(fast_slope) + abs(slow_slope)) / 2.0
+        ema_contact_bonus = (2.0 if bounce_type == "green" else 0.0) + (1.0 if (yellow_buy or yellow_sell) else 0.0)
+        arity_bonus = max(0.0, 1.0 - average_overlap)
+        score = (
+            slope_strength / max(1.0, slope_threshold) +
+            rejection_tail / 3.0 +
+            ema_contact_bonus +
+            arity_bonus -
+            reversals * 0.15
+        )
+        if bounce_type == "yellow" and slope_strength >= 18.0 and rejection_tail >= 1.0 and abs(fast_ema - slow_ema) >= 6.0:
+            score += 0.5
+        if strict_green_cross:
+            score += 0.35
+        if score < min_score:
+            continue
+
+        signal_details.append({
+            "barIndex": i,
+            "timestamp": current["time"],
+            "action": action,
+            "metrics": {
+                "bounceType": bounce_type,
+                "score": score,
+                "ema5": fast_ema,
+                "ema10": slow_ema,
+                "fastSlope": fast_slope,
+                "slowSlope": slow_slope,
+                "shortFastSlope": short_fast_slope,
+                "shortSlowSlope": short_slow_slope,
+                "upperTail": upper_tail,
+                "lowerTail": lower_tail,
+                "averageOverlapBricks": average_overlap,
+                "reversals": reversals,
+                "leftRangeOverlap": left_range_overlap,
+                "leftRangeOverlapCount": left_range_overlap_count,
+                "emaGap": fast_ema - slow_ema,
+                "strictGreenCross": strict_green_cross,
+            },
+        })
+
+    return signal_details, evaluate_signal_details(data, signal_details, config)
+
+def precompute_arity_metrics(data, lookbacks):
+    return {
+        lookback: [
+            calculate_arity_metrics(data, index, lookback)
+            for index in range(len(data))
+        ]
+        for lookback in lookbacks
+    }
+
+def run_yellow_momentum_strategy(data, config, include_evaluations=True, arity_cache=None):
+    signal_details = []
+    slope_period = max(1, config.get("yellow_momentum_slope_period", 8))
+    fast_slope_threshold = config.get("yellow_momentum_fast_slope_threshold", 30.0)
+    slow_slope_threshold = config.get("yellow_momentum_slow_slope_threshold", 25.0)
+    min_ema_gap = config.get("yellow_momentum_min_ema_gap", 4.0)
+    min_penetration = config.get("yellow_momentum_min_penetration", 1.5)
+    min_tail = config.get("yellow_momentum_min_tail", 1.0)
+    arity_lookback = max(2, config.get("yellow_momentum_arity_lookback", 8))
+    max_overlap = config.get("yellow_momentum_max_overlap", 0.95)
+    max_reversals = config.get("yellow_momentum_max_reversals", 5)
+    start_index = max(slope_period, arity_lookback - 1)
+
+    for i in range(start_index, len(data)):
+        current = data[i]
+        previous = data[i - slope_period]
+        fast_ema = get_fast_ema(current)
+        slow_ema = get_slow_ema(current)
+        previous_fast = get_fast_ema(previous)
+        previous_slow = get_slow_ema(previous)
+        if None in (fast_ema, slow_ema, previous_fast, previous_slow):
+            continue
+
+        o, h, l, c = current["open"], current["high"], current["low"], current["close"]
+        fast_slope = fast_ema - previous_fast
+        slow_slope = slow_ema - previous_slow
+        ema_gap = fast_ema - slow_ema
+        lower_tail = min(o, c) - l
+        upper_tail = h - max(o, c)
+        if arity_cache and arity_lookback in arity_cache:
+            average_overlap, reversals = arity_cache[arity_lookback][i]
+        else:
+            average_overlap, reversals = calculate_arity_metrics(data, i, arity_lookback)
+        if average_overlap > max_overlap or reversals > max_reversals:
+            continue
+
+        bullish = (
+            ema_gap >= min_ema_gap and
+            fast_slope >= fast_slope_threshold and
+            slow_slope >= slow_slope_threshold and
+            c > o and
+            l <= fast_ema and
+            c > fast_ema and
+            fast_ema - l >= min_penetration and
+            lower_tail >= min_tail
+        )
+        bearish = (
+            ema_gap <= -min_ema_gap and
+            fast_slope <= -fast_slope_threshold and
+            slow_slope <= -slow_slope_threshold and
+            (c < o or c == o) and
+            h >= fast_ema and
+            c < fast_ema and
+            h - fast_ema >= min_penetration and
+            upper_tail >= min_tail
+        )
+
+        if not bullish and not bearish:
+            continue
+
+        action = "Buy" if bullish else "Sell"
+        signal_details.append({
+            "barIndex": i,
+            "timestamp": current["time"],
+            "action": action,
+            "metrics": {
+                "setupType": "yellowMomentum",
+                "ema5": fast_ema,
+                "ema10": slow_ema,
+                "emaGap": ema_gap,
+                "fastSlope": fast_slope,
+                "slowSlope": slow_slope,
+                "yellowPenetration": fast_ema - l if bullish else h - fast_ema,
+                "upperTail": upper_tail,
+                "lowerTail": lower_tail,
+                "averageOverlapBricks": average_overlap,
+                "reversals": reversals,
+            },
+        })
+
+    evaluations = evaluate_signal_details(data, signal_details, config) if include_evaluations else []
+    return signal_details, evaluations
+
+def run_mes3_trend_tail_strategy(data, config):
+    signal_details = []
+    slope_period = max(1, config.get("mes3_ema_slope_period", 8))
+    slope_threshold = config.get("mes3_ema_slope_threshold", 2.2)
+    short_slope_period = max(1, config.get("mes3_short_slope_period", 3))
+    short_slope_threshold = config.get("mes3_short_slope_threshold", 0.7)
+    min_tail = config.get("mes3_min_tail", 0.75)
+    min_close_distance = config.get("mes3_min_close_ema_distance", 1.0)
+    arity_lookback = max(2, config.get("mes3_arity_lookback", 8))
+    max_overlap = config.get("mes3_max_overlap", 1.0)
+    max_reversals = config.get("mes3_max_reversals", 4)
+    cooldown_bars = max(0, config.get("mes3_cooldown_bars", 3))
+    start_index = max(slope_period, short_slope_period, arity_lookback - 1)
+    last_signal_index = -999999
+
+    for i in range(start_index, len(data)):
+        if i - last_signal_index <= cooldown_bars:
+            continue
+
+        current = data[i]
+        ema = current.get("ema")
+        previous_ema = data[i - slope_period].get("ema")
+        short_previous_ema = data[i - short_slope_period].get("ema")
+        if None in (ema, previous_ema, short_previous_ema):
+            continue
+
+        average_overlap, reversals = calculate_arity_metrics(data, i, arity_lookback)
+        if average_overlap > max_overlap or reversals > max_reversals:
+            continue
+
+        o, h, l, c = current["open"], current["high"], current["low"], current["close"]
+        is_up = c > o
+        is_down = c < o
+        lower_tail = min(o, c) - l
+        upper_tail = h - max(o, c)
+        ema_slope = ema - previous_ema
+        short_ema_slope = ema - short_previous_ema
+        close_to_ema = c - ema
+
+        action = None
+        if (
+            is_up and
+            ema_slope >= slope_threshold and
+            short_ema_slope >= short_slope_threshold and
+            lower_tail >= min_tail and
+            close_to_ema >= min_close_distance
+        ):
+            action = "Buy"
+        elif (
+            is_down and
+            ema_slope <= -slope_threshold and
+            short_ema_slope <= -short_slope_threshold and
+            upper_tail >= min_tail and
+            -close_to_ema >= min_close_distance
+        ):
+            action = "Sell"
+
+        if not action:
+            continue
+
+        signal_details.append({
+            "barIndex": i,
+            "timestamp": current["time"],
+            "action": action,
+            "metrics": {
+                "setupType": "mes3TrendTail",
+                "ema": ema,
+                "emaSlope": ema_slope,
+                "shortEmaSlope": short_ema_slope,
+                "upperTail": upper_tail,
+                "lowerTail": lower_tail,
+                "closeToEma": close_to_ema,
+                "averageOverlapBricks": average_overlap,
+                "reversals": reversals,
+            },
+        })
+        last_signal_index = i
+
+    return signal_details, evaluate_signal_details(data, signal_details, config)
+
+def run_mes3_previous_tail_rejection_strategy(data, config):
+    signal_details = []
+    tick_size = infer_price_increment(data)
+    slope_period = max(1, config.get("mes3_prev_tail_slope_period", 8))
+    slope_threshold = config.get("mes3_prev_tail_slope_threshold", 2.5)
+    short_slope_period = max(1, config.get("mes3_prev_tail_short_slope_period", 3))
+    short_slope_threshold = config.get("mes3_prev_tail_short_slope_threshold", 0.9)
+    min_tail = config.get("mes3_prev_tail_min_tail", 0.75)
+    extension_ticks = config.get("mes3_prev_tail_extension_ticks", 1)
+    min_extension = tick_size * extension_ticks
+    min_close_distance = config.get("mes3_prev_tail_min_close_ema_distance", 1.0)
+    arity_lookback = max(2, config.get("mes3_prev_tail_arity_lookback", 8))
+    max_overlap = config.get("mes3_prev_tail_max_overlap", 1.0)
+    max_reversals = config.get("mes3_prev_tail_max_reversals", 4)
+    cooldown_bars = max(0, config.get("mes3_prev_tail_cooldown_bars", 3))
+    start_index = max(slope_period, short_slope_period, arity_lookback - 1, 1)
+    last_signal_index = -999999
+
+    for i in range(start_index, len(data)):
+        if i - last_signal_index <= cooldown_bars:
+            continue
+
+        current = data[i]
+        previous = data[i - 1]
+        ema = current.get("ema")
+        previous_ema = data[i - slope_period].get("ema")
+        short_previous_ema = data[i - short_slope_period].get("ema")
+        if None in (ema, previous_ema, short_previous_ema):
+            continue
+
+        average_overlap, reversals = calculate_arity_metrics(data, i, arity_lookback)
+        if average_overlap > max_overlap or reversals > max_reversals:
+            continue
+
+        o, h, l, c = current["open"], current["high"], current["low"], current["close"]
+        is_up = c > o
+        is_down = c < o
+        lower_tail = min(o, c) - l
+        upper_tail = h - max(o, c)
+        lower_extension = previous["low"] - l
+        upper_extension = h - previous["high"]
+        ema_slope = ema - previous_ema
+        short_ema_slope = ema - short_previous_ema
+        close_to_ema = c - ema
+
+        action = None
+        if (
+            is_up and
+            ema_slope >= slope_threshold and
+            short_ema_slope >= short_slope_threshold and
+            lower_tail >= min_tail and
+            lower_extension >= min_extension and
+            close_to_ema >= min_close_distance
+        ):
+            action = "Buy"
+        elif (
+            is_down and
+            ema_slope <= -slope_threshold and
+            short_ema_slope <= -short_slope_threshold and
+            upper_tail >= min_tail and
+            upper_extension >= min_extension and
+            -close_to_ema >= min_close_distance
+        ):
+            action = "Sell"
+
+        if not action:
+            continue
+
+        signal_details.append({
+            "barIndex": i,
+            "timestamp": current["time"],
+            "action": action,
+            "metrics": {
+                "setupType": "mes3PreviousTailRejection",
+                "ema": ema,
+                "emaSlope": ema_slope,
+                "shortEmaSlope": short_ema_slope,
+                "upperTail": upper_tail,
+                "lowerTail": lower_tail,
+                "upperExtension": upper_extension,
+                "lowerExtension": lower_extension,
+                "closeToEma": close_to_ema,
+                "averageOverlapBricks": average_overlap,
+                "reversals": reversals,
+                "tickSize": tick_size,
+                "minExtension": min_extension,
+            },
+        })
+        last_signal_index = i
+
+    return signal_details, evaluate_signal_details(data, signal_details, config)
+
+def build_yellow_momentum_feature_cache(data, slope_periods, arity_lookbacks, arity_cache):
+    feature_cache = {}
+    for slope_period in slope_periods:
+        for arity_lookback in arity_lookbacks:
+            features = []
+            start_index = max(slope_period, arity_lookback - 1)
+            for i in range(start_index, len(data)):
+                current = data[i]
+                previous = data[i - slope_period]
+                fast_ema = get_fast_ema(current)
+                slow_ema = get_slow_ema(current)
+                previous_fast = get_fast_ema(previous)
+                previous_slow = get_slow_ema(previous)
+                if None in (fast_ema, slow_ema, previous_fast, previous_slow):
+                    continue
+
+                o, h, l, c = current["open"], current["high"], current["low"], current["close"]
+                fast_slope = fast_ema - previous_fast
+                slow_slope = slow_ema - previous_slow
+                ema_gap = fast_ema - slow_ema
+                lower_tail = min(o, c) - l
+                upper_tail = h - max(o, c)
+                average_overlap, reversals = arity_cache[arity_lookback][i]
+
+                if ema_gap > 0 and c > o and l <= fast_ema and c > fast_ema:
+                    features.append({
+                        "barIndex": i,
+                        "timestamp": current["time"],
+                        "action": "Buy",
+                        "trendFastSlope": fast_slope,
+                        "trendSlowSlope": slow_slope,
+                        "trendEmaGap": ema_gap,
+                        "yellowPenetration": fast_ema - l,
+                        "rejectionTail": lower_tail,
+                        "metrics": {
+                            "setupType": "yellowMomentum",
+                            "ema5": fast_ema,
+                            "ema10": slow_ema,
+                            "emaGap": ema_gap,
+                            "fastSlope": fast_slope,
+                            "slowSlope": slow_slope,
+                            "yellowPenetration": fast_ema - l,
+                            "upperTail": upper_tail,
+                            "lowerTail": lower_tail,
+                            "averageOverlapBricks": average_overlap,
+                            "reversals": reversals,
+                        },
+                    })
+                elif ema_gap < 0 and (c < o or c == o) and h >= fast_ema and c < fast_ema:
+                    features.append({
+                        "barIndex": i,
+                        "timestamp": current["time"],
+                        "action": "Sell",
+                        "trendFastSlope": -fast_slope,
+                        "trendSlowSlope": -slow_slope,
+                        "trendEmaGap": -ema_gap,
+                        "yellowPenetration": h - fast_ema,
+                        "rejectionTail": upper_tail,
+                        "metrics": {
+                            "setupType": "yellowMomentum",
+                            "ema5": fast_ema,
+                            "ema10": slow_ema,
+                            "emaGap": ema_gap,
+                            "fastSlope": fast_slope,
+                            "slowSlope": slow_slope,
+                            "yellowPenetration": h - fast_ema,
+                            "upperTail": upper_tail,
+                            "lowerTail": lower_tail,
+                            "averageOverlapBricks": average_overlap,
+                            "reversals": reversals,
+                        },
+                    })
+            feature_cache[(slope_period, arity_lookback)] = features
+    return feature_cache
+
+def filter_yellow_momentum_features(features, config):
+    return [
+        {
+            "barIndex": feature["barIndex"],
+            "timestamp": feature["timestamp"],
+            "action": feature["action"],
+            "metrics": feature["metrics"],
+        }
+        for feature in features
+        if (
+            feature["trendFastSlope"] >= config["yellow_momentum_fast_slope_threshold"] and
+            feature["trendSlowSlope"] >= config["yellow_momentum_slow_slope_threshold"] and
+            feature["trendEmaGap"] >= config["yellow_momentum_min_ema_gap"] and
+            feature["yellowPenetration"] >= config["yellow_momentum_min_penetration"] and
+            feature["rejectionTail"] >= config["yellow_momentum_min_tail"] and
+            feature["metrics"]["averageOverlapBricks"] <= config["yellow_momentum_max_overlap"] and
+            feature["metrics"]["reversals"] <= config["yellow_momentum_max_reversals"]
+        )
+    ]
 
 def run_arid_strategy(data, config):
     signal_details = []
@@ -202,7 +812,7 @@ def run_arid_strategy(data, config):
 
     return signal_details, evaluate_signal_details(data, signal_details, config)
 
-def evaluate_set3_signals(data, signal_details):
+def evaluate_set3_signals(data, signal_details, config):
     evaluations = []
 
     for signal in signal_details:
@@ -211,6 +821,8 @@ def evaluate_set3_signals(data, signal_details):
         direction = signal["action"]
         entry_price = entry_bar["close"]
         brick_size = abs(entry_bar["close"] - entry_bar["open"])
+        entry_date = entry_bar["time"].split("T")[0]
+        end_time = config.get("end_time", "11:00:00")
         evaluation = {
             "entry_time": entry_bar["time"],
             "barIndex": entry_index,
@@ -222,6 +834,11 @@ def evaluate_set3_signals(data, signal_details):
 
         for exit_index in range(entry_index + 1, len(data)):
             exit_bar = data[exit_index]
+            exit_date, exit_time = exit_bar["time"].split("T")
+            if exit_date != entry_date or exit_time.replace("Z", "") > end_time:
+                evaluation["outcome_reason"] = "No opposing brick before session end"
+                break
+
             is_opposing = (
                 direction == "Buy" and exit_bar["close"] < exit_bar["open"]
             ) or (
@@ -250,10 +867,103 @@ def evaluate_set3_signals(data, signal_details):
 
     return evaluations
 
+def run_arid_e_trade_sequence(data, signal_details, config):
+    trades = []
+    active_until_index = -1
+    cumulative_by_date = {}
+
+    def direction_of(bar):
+        if bar["close"] > bar["open"]:
+            return 1
+        if bar["close"] < bar["open"]:
+            return -1
+        return 0
+
+    def action_direction(action):
+        return 1 if action == "Buy" else -1
+
+    sorted_signals = sorted(signal_details, key=lambda signal: signal["markerBarIndex"])
+    for signal in sorted_signals:
+        marker_index = signal["markerBarIndex"]
+        entry_index = marker_index if signal.get("setupType") == "synthetic" else marker_index + 1
+        if entry_index <= active_until_index:
+            continue
+
+        if entry_index >= len(data):
+            continue
+
+        entry_bar = data[entry_index]
+        entry_date, entry_time = entry_bar["time"].split("T")
+        entry_time = entry_time.replace("Z", "")
+        if not config["start_time"] <= entry_time <= config["end_time"]:
+            continue
+
+        direction = action_direction(signal["action"])
+        if direction_of(entry_bar) != direction:
+            continue
+
+        brick_size = abs(entry_bar["close"] - entry_bar["open"])
+        if brick_size == 0:
+            continue
+
+        pnl_before = cumulative_by_date.get(entry_date, 0.0)
+        entry_price = entry_bar["close"]
+        trade = {
+            "barIndex": signal["barIndex"],
+            "markerBarIndex": marker_index,
+            "entry_barIndex": entry_index,
+            "entry_time": entry_bar["time"],
+            "direction": signal["action"],
+            "setupType": signal.get("setupType"),
+            "pnl_before": pnl_before,
+            "profit_bricks": None,
+            "pnl_after": pnl_before,
+            "result": "Open",
+        }
+
+        for exit_index in range(entry_index + 1, len(data)):
+            exit_bar = data[exit_index]
+            exit_date, exit_time = exit_bar["time"].split("T")
+            exit_time = exit_time.replace("Z", "")
+            if exit_date != entry_date or exit_time > config["end_time"]:
+                trade["outcome_reason"] = "No opposing brick before session end"
+                break
+
+            if direction_of(exit_bar) != -direction:
+                continue
+
+            raw_profit = (
+                exit_bar["close"] - entry_price
+                if direction > 0
+                else entry_price - exit_bar["close"]
+            )
+            profit_bricks = raw_profit / brick_size
+            pnl_after = pnl_before + profit_bricks
+            cumulative_by_date[entry_date] = pnl_after
+            trade.update({
+                "exit_barIndex": exit_index,
+                "exit_time": exit_bar["time"],
+                "profit_bricks": profit_bricks,
+                "pnl_after": pnl_after,
+                "result": "Win" if profit_bricks > 0 else "Loss" if profit_bricks < 0 else "BE",
+                "outcome_reason": "First opposing brick closed",
+            })
+            active_until_index = exit_index
+            break
+        else:
+            active_until_index = entry_index
+
+        if trade["profit_bricks"] is None:
+            active_until_index = entry_index
+
+        trades.append(trade)
+
+    return trades
+
 def run_no_tail_arity_strategy(data, config):
     signal_details = []
     if not data:
-        return signal_details, []
+        return signal_details, [], []
 
     # Signal Set 3 is intentionally restricted to body-only Renko data.
     has_tails = any(
@@ -262,11 +972,19 @@ def run_no_tail_arity_strategy(data, config):
         for bar in data
     )
     if has_tails:
-        return signal_details, []
+        return signal_details, [], []
 
     lookback = max(3, config["set3_left_lookback"])
     slope_period = max(1, config["set3_ema_slope_period"])
     start_index = max(lookback + 1, slope_period)
+    body_sizes = sorted(
+        abs(bar["close"] - bar["open"])
+        for bar in data
+        if abs(bar["close"] - bar["open"]) > 0
+    )
+    canonical_brick_size = body_sizes[len(body_sizes) // 2]
+    body_size_tolerance = config.get("tick_size", 0.25) / 2
+    last_signal_zone = None
 
     for i in range(start_index, len(data)):
         current = data[i]
@@ -274,27 +992,76 @@ def run_no_tail_arity_strategy(data, config):
         time_string = current["time"].split("T")[1].replace("Z", "")
         if not config["start_time"] <= time_string <= config["end_time"]:
             continue
+        try:
+            prior_delta = (
+                datetime.fromisoformat(data[i - 1]["time"].replace("Z", "")) -
+                datetime.fromisoformat(data[i - 2]["time"].replace("Z", ""))
+            ).total_seconds()
+        except ValueError:
+            continue
+        if prior_delta < config["set3_min_prior_brick_seconds"]:
+            continue
 
         current_direction = 1 if current["close"] > current["open"] else -1
         pullback_direction = 1 if pullback["close"] > pullback["open"] else -1
-        if current_direction == pullback_direction:
-            continue
+        is_synthetic = current_direction == pullback_direction
 
         brick_size = abs(current["close"] - current["open"])
-        if brick_size == 0 or current.get("ema") is None or pullback.get("ema") is None:
+        if (
+            brick_size == 0 or
+            abs(brick_size - canonical_brick_size) > body_size_tolerance or
+            current.get("ema") is None or
+            pullback.get("ema") is None
+        ):
             continue
-
-        slope_base = data[i - slope_period].get("ema")
-        if slope_base is None:
-            continue
-        ema_slope = current["ema"] - slope_base
-        minimum_gap = config["set3_min_ema_gap_bricks"] * brick_size
 
         current_body_low = min(current["open"], current["close"])
         current_body_high = max(current["open"], current["close"])
-        pullback_body_low = min(pullback["open"], pullback["close"])
-        pullback_body_high = max(pullback["open"], pullback["close"])
-        left_bars = data[i - lookback - 1:i - 1]
+        if is_synthetic:
+            slope_index = i
+            if current_direction > 0:
+                projected_open = current_body_low
+                projected_close = current_body_low - brick_size
+            else:
+                projected_open = current_body_high
+                projected_close = current_body_high + brick_size
+            pullback_body_low = min(projected_open, projected_close)
+            pullback_body_high = max(projected_open, projected_close)
+            left_bars = data[i - lookback:i]
+            setup_ema = current["ema"]
+        else:
+            pullback_start = i - 1
+            while pullback_start > 0:
+                previous_direction = (
+                    1 if data[pullback_start - 1]["close"] > data[pullback_start - 1]["open"]
+                    else -1 if data[pullback_start - 1]["close"] < data[pullback_start - 1]["open"]
+                    else 0
+                )
+                if previous_direction != pullback_direction:
+                    break
+                pullback_start -= 1
+
+            slope_index = pullback_start - 1
+            if slope_index < slope_period:
+                continue
+            projected_open = None
+            projected_close = None
+            pullback_body_low = min(pullback["open"], pullback["close"])
+            pullback_body_high = max(pullback["open"], pullback["close"])
+            left_bars = data[max(0, pullback_start - lookback):pullback_start]
+            setup_ema = pullback["ema"]
+
+        slope_base = data[slope_index - slope_period].get("ema")
+        slope_ema = data[slope_index].get("ema")
+        if slope_base is None or slope_ema is None:
+            continue
+        ema_slope = slope_ema - slope_base
+        minimum_gap = (
+            config["set3_synthetic_min_ema_gap_bricks"]
+            if is_synthetic
+            else config["set3_min_ema_gap_bricks"]
+        ) * brick_size
+
         left_overlaps = sum(
             min(max(bar["open"], bar["close"]), pullback_body_high) >
             max(min(bar["open"], bar["close"]), pullback_body_low)
@@ -302,14 +1069,28 @@ def run_no_tail_arity_strategy(data, config):
         )
         if left_overlaps > config["set3_max_left_overlaps"]:
             continue
+        if last_signal_zone is not None:
+            vertical_gap = max(
+                0.0,
+                max(last_signal_zone["low"], pullback_body_low) -
+                min(last_signal_zone["high"], pullback_body_high)
+            )
+            if vertical_gap < 2 * brick_size:
+                continue
 
         if current_direction > 0:
             trend_is_strong = ema_slope >= config["set3_ema_slope_threshold"]
-            setup_is_off_ema = current_body_low - current["ema"] >= minimum_gap
+            if is_synthetic:
+                setup_is_off_ema = pullback_body_low - setup_ema >= minimum_gap
+            else:
+                setup_is_off_ema = current_body_low - current["ema"] >= minimum_gap
             action = "Buy"
         else:
             trend_is_strong = ema_slope <= -config["set3_ema_slope_threshold"]
-            setup_is_off_ema = current["ema"] - current_body_high >= minimum_gap
+            if is_synthetic:
+                setup_is_off_ema = setup_ema - pullback_body_high >= minimum_gap
+            else:
+                setup_is_off_ema = current["ema"] - current_body_high >= minimum_gap
             action = "Sell"
 
         if not trend_is_strong or not setup_is_off_ema:
@@ -317,24 +1098,37 @@ def run_no_tail_arity_strategy(data, config):
 
         signal_details.append({
             "barIndex": i,
-            "markerBarIndex": i - 1,
+            "markerBarIndex": i if is_synthetic else i - 1,
             "timestamp": current["time"],
-            "markerTimestamp": pullback["time"],
+            "markerTimestamp": current["time"] if is_synthetic else pullback["time"],
             "action": action,
+            "setupType": "synthetic" if is_synthetic else "actual",
+            "virtualBrick": {
+                "open": projected_open,
+                "close": projected_close,
+            } if is_synthetic else None,
             "metrics": {
                 "emaSlope": ema_slope,
                 "emaGapBricks": (
-                    current_body_low - current["ema"]
+                    (pullback_body_low - setup_ema if is_synthetic else current_body_low - current["ema"])
                     if current_direction > 0
-                    else current["ema"] - current_body_high
+                    else (setup_ema - pullback_body_high if is_synthetic else current["ema"] - current_body_high)
                 ) / brick_size,
                 "leftOverlaps": left_overlaps,
                 "leftLookback": lookback,
-                "pullbackBarIndex": i - 1,
+                "pullbackBarIndex": None if is_synthetic else i - 1,
             },
         })
+        last_signal_zone = {
+            "low": pullback_body_low,
+            "high": pullback_body_high,
+        }
 
-    return signal_details, evaluate_set3_signals(data, signal_details)
+    return (
+        signal_details,
+        evaluate_set3_signals(data, signal_details, config),
+        run_arid_e_trade_sequence(data, signal_details, config),
+    )
 
 def run_strategy(data, config):
     trades = []
@@ -514,6 +1308,16 @@ def run_strategy(data, config):
     return signals, signal_details, trades
 
 def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
+    # Set campaign parameters based on the chosen strategy
+    target_bricks = 2.0
+    stop_bricks = 2.0
+    entry_cooldown_bars = 3
+    be_trigger_bricks = 1.0
+    
+    if exit_strategy == "fixed2":
+        stop_bricks = 1.5
+        entry_cooldown_bars = 2
+
     # Group bar indices by date YYYY-MM-DD
     date_to_bar_indices = {}
     for i, bar in enumerate(data):
@@ -554,6 +1358,7 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
         trade_history = []
         done_for_the_day = False
         success_time = None
+        last_exit_bar_index = -999
         
         # We assume the brick size is constant or can be derived from the first bar of the day
         first_bar = data[bar_indices[0]]
@@ -644,24 +1449,24 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                                 daily_net_profit += 0.0
                                 trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
-                                daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
+                                daily_net_profit -= stop_bricks
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -stop_bricks})
                             active_trade = None
                         elif hit_stop:
                             if be_triggered:
                                 daily_net_profit += 0.0
                                 trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
-                                daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
+                                daily_net_profit -= stop_bricks
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -stop_bricks})
                             active_trade = None
                         elif hit_target:
-                            daily_net_profit += 2.0
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": 2.0})
+                            daily_net_profit += target_bricks
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": target_bricks})
                             active_trade = None
                         else:
                             # Check if we trigger breakeven for the next bar
-                            if bar["high"] >= entry_price + brick_size and not be_triggered:
+                            if bar["high"] >= entry_price + be_trigger_bricks * brick_size and not be_triggered:
                                 active_trade["be_triggered"] = True
                                 active_trade["stop_price"] = entry_price
                                 be_triggered = True
@@ -734,39 +1539,45 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                                 daily_net_profit += 0.0
                                 trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
-                                daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
+                                daily_net_profit -= stop_bricks
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -stop_bricks})
                             active_trade = None
                         elif hit_stop:
                             if be_triggered:
                                 daily_net_profit += 0.0
                                 trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "BE", "profit_bricks": 0.0})
                             else:
-                                daily_net_profit -= 2.0
-                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -2.0})
+                                daily_net_profit -= stop_bricks
+                                trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Loss", "profit_bricks": -stop_bricks})
                             active_trade = None
                         elif hit_target:
-                            daily_net_profit += 2.0
-                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": 2.0})
+                            daily_net_profit += target_bricks
+                            trade_history.append({**active_trade, "exit_time": bar["time"], "exit_barIndex": i, "result": "Win", "profit_bricks": target_bricks})
                             active_trade = None
                         else:
                             # Check if we trigger breakeven for the next bar
-                            if bar["low"] <= entry_price - brick_size and not be_triggered:
+                            if bar["low"] <= entry_price - be_trigger_bricks * brick_size and not be_triggered:
                                 active_trade["be_triggered"] = True
                                 active_trade["stop_price"] = entry_price
                                 be_triggered = True
                                 stop_price = entry_price
                             
                 # Check target hit
-                if daily_net_profit >= 2.0:
+                if daily_net_profit >= target_bricks:
                     done_for_the_day = True
                     success_time = bar["time"]
                     break
             
+            if was_in_position and active_trade is None:
+                last_exit_bar_index = i
+            
             # A signal that completes while a position is open is ignored,
             # including a signal on the same bar that closes the position.
+            # Enforce at least 2 vertical bars separating consecutive entries (i - last_exit_bar_index >= entry_cooldown_bars).
             if not was_in_position and active_trade is None and not done_for_the_day:
                 if i in day_signals_by_index:
+                    if last_exit_bar_index != -999 and (i - last_exit_bar_index) < entry_cooldown_bars:
+                        continue
                     sig = day_signals_by_index[i]
                     direction = sig["action"]
                     entry_price = bar["close"]
@@ -778,8 +1589,8 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
                         stop_price = entry_price - 2.0 * brick_size if direction == "Buy" else entry_price + 2.0 * brick_size
                         target_price = entry_price + 1.0 * brick_size if direction == "Buy" else entry_price - 1.0 * brick_size
                     else:
-                        stop_price = entry_price - 2.0 * brick_size if direction == "Buy" else entry_price + 2.0 * brick_size
-                        target_price = entry_price + 2.0 * brick_size if direction == "Buy" else entry_price - 2.0 * brick_size
+                        stop_price = entry_price - stop_bricks * brick_size if direction == "Buy" else entry_price + stop_bricks * brick_size
+                        target_price = entry_price + target_bricks * brick_size if direction == "Buy" else entry_price - target_bricks * brick_size
                         
                     active_trade = {
                         "entry_time": bar["time"],
@@ -863,9 +1674,522 @@ def run_daily_campaign(data, signal_details, config, exit_strategy="fixed"):
             "losing_days": losing_days,
             "win_rate": win_rate,
             "avg_success_time": avg_success_time_str,
-            "max_drawdown_bricks": max_drawdown
+            "max_drawdown_bricks": max_drawdown,
+            "target_bricks": target_bricks
         }
     }
+
+def infer_price_increment(data):
+    values = []
+    for bar in data[:min(len(data), 5000)]:
+        values.extend([bar["open"], bar["high"], bar["low"], bar["close"]])
+    unique_values = sorted(set(values))
+    increments = [
+        round(b - a, 10)
+        for a, b in zip(unique_values, unique_values[1:])
+        if b > a
+    ]
+    return min(increments) if increments else 1.0
+
+def infer_range_size(data):
+    ranges = sorted(
+        bar["high"] - bar["low"]
+        for bar in data
+        if bar["high"] > bar["low"]
+    )
+    if not ranges:
+        return 1.0
+    return ranges[len(ranges) // 2]
+
+def summarize_campaign(daily_reports, target_bricks, exit_strategy):
+    total_days = len(daily_reports)
+    winning_days = len([day for day in daily_reports if day["net_profit_bricks"] > 0])
+    losing_days = len([day for day in daily_reports if day["net_profit_bricks"] <= 0])
+    total_trades = sum(day["trades_count"] for day in daily_reports)
+    net_profit = sum(day["net_profit_bricks"] for day in daily_reports)
+    winning_trades = 0
+    losing_trades = 0
+    breakeven_trades = 0
+    max_drawdown = 0.0
+    running_pnl = 0.0
+    for day in daily_reports:
+        for trade in day["trades"]:
+            profit = trade.get("profit_bricks", 0.0)
+            if profit > 0:
+                winning_trades += 1
+            elif profit < 0:
+                losing_trades += 1
+            else:
+                breakeven_trades += 1
+            running_pnl += profit
+            max_drawdown = min(max_drawdown, running_pnl)
+
+    return {
+        "daily_reports": daily_reports,
+        "exit_strategy": exit_strategy,
+        "summary": {
+            "total_days": total_days,
+            "winning_days": winning_days,
+            "losing_days": losing_days,
+            "win_rate": (winning_days / total_days * 100) if total_days else 0.0,
+            "total_trades": total_trades,
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
+            "breakeven_trades": breakeven_trades,
+            "trade_win_rate": (winning_trades / total_trades * 100) if total_trades else 0.0,
+            "net_profit_bricks": net_profit,
+            "max_drawdown_bricks": max_drawdown,
+            "target_bricks": target_bricks,
+        }
+    }
+
+def run_ema_bounce_campaign(data, signal_details, config):
+    campaign_name = "Campaign EMA Bounce"
+    start_time = config.get("start_time", "06:31:00")
+    end_time = config.get("end_time", "11:00:00")
+    tick_size = infer_price_increment(data)
+    range_size = infer_range_size(data)
+    stop_buffer = config.get("ema_bounce_stop_buffer_ticks", 2) * tick_size
+    max_stop_distance = config.get("ema_bounce_max_stop_ticks", 15) * tick_size
+
+    date_to_bar_indices = {}
+    for index, bar in enumerate(data):
+        date = bar["time"].split("T")[0]
+        date_to_bar_indices.setdefault(date, []).append(index)
+
+    date_to_signals = {}
+    for signal in signal_details:
+        date, time = signal["timestamp"].split("T")
+        time = time.replace("Z", "")
+        if start_time <= time <= end_time:
+            date_to_signals.setdefault(date, []).append(signal)
+
+    daily_reports = []
+    for date in sorted(date_to_bar_indices):
+        day_signals = sorted(date_to_signals.get(date, []), key=lambda signal: signal["barIndex"])
+        if not day_signals:
+            continue
+
+        day_signal_by_index = {signal["barIndex"]: signal for signal in day_signals}
+        active_trade = None
+        trades = []
+        skipped_trades = []
+        daily_net_profit = 0.0
+
+        for index in date_to_bar_indices[date]:
+            bar = data[index]
+            _, time = bar["time"].split("T")
+            time = time.replace("Z", "")
+
+            if active_trade is not None:
+                direction = active_trade["direction"]
+                entry_price = active_trade["entry_price"]
+                stop_price = active_trade["stop_price"]
+                if direction == "Buy":
+                    hit_stop = bar["low"] <= stop_price
+                    opposite_close = bar["close"] < bar["open"]
+                    if hit_stop:
+                        profit_points = stop_price - entry_price
+                        profit_bricks = profit_points / range_size
+                        daily_net_profit += profit_bricks
+                        trades.append({
+                            **active_trade,
+                            "exit_time": bar["time"],
+                            "exit_barIndex": index,
+                            "exit_price": stop_price,
+                            "result": "Stop",
+                            "profit_points": profit_points,
+                            "profit_bricks": profit_bricks,
+                        })
+                        active_trade = None
+                    elif opposite_close:
+                        profit_points = bar["close"] - entry_price
+                        profit_bricks = profit_points / range_size
+                        daily_net_profit += profit_bricks
+                        trades.append({
+                            **active_trade,
+                            "exit_time": bar["time"],
+                            "exit_barIndex": index,
+                            "exit_price": bar["close"],
+                            "result": "OppositeClose",
+                            "profit_points": profit_points,
+                            "profit_bricks": profit_bricks,
+                        })
+                        active_trade = None
+                else:
+                    hit_stop = bar["high"] >= stop_price
+                    opposite_close = bar["close"] > bar["open"]
+                    if hit_stop:
+                        profit_points = entry_price - stop_price
+                        profit_bricks = profit_points / range_size
+                        daily_net_profit += profit_bricks
+                        trades.append({
+                            **active_trade,
+                            "exit_time": bar["time"],
+                            "exit_barIndex": index,
+                            "exit_price": stop_price,
+                            "result": "Stop",
+                            "profit_points": profit_points,
+                            "profit_bricks": profit_bricks,
+                        })
+                        active_trade = None
+                    elif opposite_close:
+                        profit_points = entry_price - bar["close"]
+                        profit_bricks = profit_points / range_size
+                        daily_net_profit += profit_bricks
+                        trades.append({
+                            **active_trade,
+                            "exit_time": bar["time"],
+                            "exit_barIndex": index,
+                            "exit_price": bar["close"],
+                            "result": "OppositeClose",
+                            "profit_points": profit_points,
+                            "profit_bricks": profit_bricks,
+                        })
+                        active_trade = None
+
+            if active_trade is not None or time > end_time:
+                continue
+            signal = day_signal_by_index.get(index)
+            if not signal:
+                continue
+
+            direction = signal["action"]
+            entry_price = bar["close"]
+            if direction == "Buy":
+                stop_price = bar["low"] - stop_buffer
+                stop_distance = entry_price - stop_price
+            else:
+                stop_price = bar["high"] + stop_buffer
+                stop_distance = stop_price - entry_price
+
+            if stop_distance > max_stop_distance:
+                skipped_trades.append({
+                    "entry_time": bar["time"],
+                    "entry_barIndex": index,
+                    "direction": direction,
+                    "entry_price": entry_price,
+                    "stop_price": stop_price,
+                    "stop_distance_points": stop_distance,
+                    "reason": "Stop distance too wide",
+                })
+                continue
+
+            active_trade = {
+                "campaign": campaign_name,
+                "entry_time": bar["time"],
+                "entry_barIndex": index,
+                "direction": direction,
+                "entry_price": entry_price,
+                "stop_price": stop_price,
+                "stop_distance_points": stop_distance,
+                "stop_distance_bricks": stop_distance / range_size,
+                "bounce_type": signal.get("metrics", {}).get("bounceType"),
+            }
+
+        if active_trade is not None:
+            last_index = date_to_bar_indices[date][-1]
+            last_bar = data[last_index]
+            if active_trade["direction"] == "Buy":
+                profit_points = last_bar["close"] - active_trade["entry_price"]
+            else:
+                profit_points = active_trade["entry_price"] - last_bar["close"]
+            profit_bricks = profit_points / range_size
+            daily_net_profit += profit_bricks
+            trades.append({
+                **active_trade,
+                "exit_time": last_bar["time"],
+                "exit_barIndex": last_index,
+                "exit_price": last_bar["close"],
+                "result": "EndSession",
+                "profit_points": profit_points,
+                "profit_bricks": profit_bricks,
+            })
+
+        daily_reports.append({
+            "date": date,
+            "net_profit_bricks": daily_net_profit,
+            "result": "Win" if daily_net_profit > 0 else "Loss/Flat",
+            "success_time": None,
+            "trades_count": len(trades),
+            "trades": trades,
+            "skipped_trades": skipped_trades,
+        })
+
+    result = summarize_campaign(daily_reports, 0.0, "ema_bounce_opposite_close")
+    result["name"] = campaign_name
+    result["rules"] = {
+        "entry": "Close of EMA Bounce Set 2 signal bar",
+        "stop": "Signal tail plus two inferred ticks",
+        "max_stop_ticks": config.get("ema_bounce_max_stop_ticks", 15),
+        "exit": "First opposite-color close, stop, or session end",
+        "range_size": range_size,
+        "tick_size": tick_size,
+    }
+    return result
+
+def run_yellow_momentum_campaign(data, signal_details, config):
+    campaign_name = "Yellow Momentum 1:1"
+    start_time = config.get("start_time", "06:31:00")
+    end_time = config.get("end_time", "11:00:00")
+    range_size = infer_range_size(data)
+    tick_size = infer_price_increment(data)
+
+    date_to_bar_indices = {}
+    for index, bar in enumerate(data):
+        date = bar["time"].split("T")[0]
+        date_to_bar_indices.setdefault(date, []).append(index)
+
+    date_to_signals = {}
+    for signal in signal_details:
+        date, time = signal["timestamp"].split("T")
+        time = time.replace("Z", "")
+        if start_time <= time <= end_time:
+            date_to_signals.setdefault(date, []).append(signal)
+
+    daily_reports = []
+    for date in sorted(date_to_bar_indices):
+        day_signals = sorted(date_to_signals.get(date, []), key=lambda signal: signal["barIndex"])
+        if not day_signals:
+            continue
+
+        day_signal_by_index = {signal["barIndex"]: signal for signal in day_signals}
+        active_trade = None
+        trades = []
+        daily_net_profit = 0.0
+
+        for index in date_to_bar_indices[date]:
+            bar = data[index]
+            _, time = bar["time"].split("T")
+            time = time.replace("Z", "")
+
+            if active_trade is not None:
+                direction = active_trade["direction"]
+                entry_price = active_trade["entry_price"]
+                stop_price = active_trade["stop_price"]
+                target_price = active_trade["target_price"]
+
+                if direction == "Buy":
+                    hit_stop = bar["low"] <= stop_price
+                    hit_target = bar["high"] >= target_price
+                    if hit_stop or hit_target:
+                        exit_price = stop_price if hit_stop else target_price
+                        profit_points = exit_price - entry_price
+                        profit_bricks = profit_points / range_size
+                        daily_net_profit += profit_bricks
+                        trades.append({
+                            **active_trade,
+                            "exit_time": bar["time"],
+                            "exit_barIndex": index,
+                            "exit_price": exit_price,
+                            "result": "Stop" if hit_stop else "Target",
+                            "profit_points": profit_points,
+                            "profit_bricks": profit_bricks,
+                        })
+                        active_trade = None
+                else:
+                    hit_stop = bar["high"] >= stop_price
+                    hit_target = bar["low"] <= target_price
+                    if hit_stop or hit_target:
+                        exit_price = stop_price if hit_stop else target_price
+                        profit_points = entry_price - exit_price
+                        profit_bricks = profit_points / range_size
+                        daily_net_profit += profit_bricks
+                        trades.append({
+                            **active_trade,
+                            "exit_time": bar["time"],
+                            "exit_barIndex": index,
+                            "exit_price": exit_price,
+                            "result": "Stop" if hit_stop else "Target",
+                            "profit_points": profit_points,
+                            "profit_bricks": profit_bricks,
+                        })
+                        active_trade = None
+
+            if active_trade is not None or time > end_time:
+                continue
+            signal = day_signal_by_index.get(index)
+            if not signal:
+                continue
+
+            direction = signal["action"]
+            entry_price = bar["close"]
+            if direction == "Buy":
+                stop_price = entry_price - range_size
+                target_price = entry_price + range_size
+            else:
+                stop_price = entry_price + range_size
+                target_price = entry_price - range_size
+
+            active_trade = {
+                "campaign": campaign_name,
+                "entry_time": bar["time"],
+                "entry_barIndex": index,
+                "direction": direction,
+                "entry_price": entry_price,
+                "stop_price": stop_price,
+                "target_price": target_price,
+                "stop_distance_points": range_size,
+                "stop_distance_bricks": 1.0,
+                "bounce_type": "yellow",
+            }
+
+        if active_trade is not None:
+            last_index = date_to_bar_indices[date][-1]
+            last_bar = data[last_index]
+            if active_trade["direction"] == "Buy":
+                profit_points = last_bar["close"] - active_trade["entry_price"]
+            else:
+                profit_points = active_trade["entry_price"] - last_bar["close"]
+            profit_bricks = profit_points / range_size
+            daily_net_profit += profit_bricks
+            trades.append({
+                **active_trade,
+                "exit_time": last_bar["time"],
+                "exit_barIndex": last_index,
+                "exit_price": last_bar["close"],
+                "result": "EndSession",
+                "profit_points": profit_points,
+                "profit_bricks": profit_bricks,
+            })
+
+        daily_reports.append({
+            "date": date,
+            "net_profit_bricks": daily_net_profit,
+            "result": "Win" if daily_net_profit > 0 else "Loss/Flat",
+            "success_time": None,
+            "trades_count": len(trades),
+            "trades": trades,
+            "skipped_trades": [],
+        })
+
+    result = summarize_campaign(daily_reports, 1.0, "yellow_momentum_1_to_1")
+    result["name"] = campaign_name
+    result["rules"] = {
+        "entry": "Close of yellow momentum signal bar",
+        "stop": "One range against entry",
+        "target": "One range in favor",
+        "range_size": range_size,
+        "tick_size": tick_size,
+    }
+    return result
+
+def build_yellow_momentum_outcome_cache(data, config):
+    range_size = infer_range_size(data)
+    date_to_bar_indices = {}
+    for index, bar in enumerate(data):
+        date = bar["time"].split("T")[0]
+        date_to_bar_indices.setdefault(date, []).append(index)
+
+    outcome_cache = {}
+    for _, indices in date_to_bar_indices.items():
+        last_index = indices[-1]
+        last_bar = data[last_index]
+        for position, index in enumerate(indices):
+            bar = data[index]
+            for direction in ("Buy", "Sell"):
+                entry_price = bar["close"]
+                if direction == "Buy":
+                    stop_price = entry_price - range_size
+                    target_price = entry_price + range_size
+                else:
+                    stop_price = entry_price + range_size
+                    target_price = entry_price - range_size
+
+                exit_index = last_index
+                exit_price = last_bar["close"]
+                result = "EndSession"
+                for future_index in indices[position + 1:]:
+                    future_bar = data[future_index]
+                    if direction == "Buy":
+                        hit_stop = future_bar["low"] <= stop_price
+                        hit_target = future_bar["high"] >= target_price
+                        if hit_stop or hit_target:
+                            exit_index = future_index
+                            exit_price = stop_price if hit_stop else target_price
+                            result = "Stop" if hit_stop else "Target"
+                            break
+                    else:
+                        hit_stop = future_bar["high"] >= stop_price
+                        hit_target = future_bar["low"] <= target_price
+                        if hit_stop or hit_target:
+                            exit_index = future_index
+                            exit_price = stop_price if hit_stop else target_price
+                            result = "Stop" if hit_stop else "Target"
+                            break
+
+                profit_points = (
+                    exit_price - entry_price
+                    if direction == "Buy"
+                    else entry_price - exit_price
+                )
+                outcome_cache[(index, direction)] = {
+                    "campaign": "Yellow Momentum 1:1",
+                    "entry_time": bar["time"],
+                    "entry_barIndex": index,
+                    "direction": direction,
+                    "entry_price": entry_price,
+                    "stop_price": stop_price,
+                    "target_price": target_price,
+                    "stop_distance_points": range_size,
+                    "stop_distance_bricks": 1.0,
+                    "bounce_type": "yellow",
+                    "exit_time": data[exit_index]["time"],
+                    "exit_barIndex": exit_index,
+                    "exit_price": exit_price,
+                    "result": result,
+                    "profit_points": profit_points,
+                    "profit_bricks": profit_points / range_size,
+                }
+
+    return outcome_cache
+
+def run_yellow_momentum_campaign_from_cache(data, signal_details, config, outcome_cache, rules=None):
+    start_time = config.get("start_time", "06:31:00")
+    end_time = config.get("end_time", "11:00:00")
+    date_to_signals = {}
+    for signal in signal_details:
+        date, time = signal["timestamp"].split("T")
+        time = time.replace("Z", "")
+        if start_time <= time <= end_time:
+            date_to_signals.setdefault(date, []).append(signal)
+
+    daily_reports = []
+    for date in sorted(date_to_signals):
+        active_until_index = -1
+        daily_net_profit = 0.0
+        trades = []
+        for signal in sorted(date_to_signals[date], key=lambda item: item["barIndex"]):
+            if signal["barIndex"] <= active_until_index:
+                continue
+            trade = outcome_cache.get((signal["barIndex"], signal["action"]))
+            if not trade:
+                continue
+            trade = trade.copy()
+            trades.append(trade)
+            daily_net_profit += trade["profit_bricks"]
+            active_until_index = trade["exit_barIndex"]
+
+        daily_reports.append({
+            "date": date,
+            "net_profit_bricks": daily_net_profit,
+            "result": "Win" if daily_net_profit > 0 else "Loss/Flat",
+            "success_time": None,
+            "trades_count": len(trades),
+            "trades": trades,
+            "skipped_trades": [],
+        })
+
+    result = summarize_campaign(daily_reports, 1.0, "yellow_momentum_1_to_1")
+    result["name"] = "Yellow Momentum 1:1"
+    result["rules"] = rules or {
+        "entry": "Close of yellow momentum signal bar",
+        "stop": "One range against entry",
+        "target": "One range in favor",
+        "range_size": infer_range_size(data),
+        "tick_size": infer_price_increment(data),
+    }
+    return result
 
 def analyze_alignment(signals, annotations, data):
     # Map raw data timestamp to bar details for easy retrieval
@@ -980,7 +2304,8 @@ def print_report(chart_name, signals, evaluations, matches, false_negatives, fal
         print("Daily Session Campaign (Option B):")
         print(f"  - Exit Strategy Mode: {campaign_results.get('exit_strategy', 'fixed').upper()}")
         print(f"  - Total Trading Days: {summary['total_days']}")
-        print(f"  - Winning Days (+2 bricks target): {summary['winning_days']} ({summary['win_rate']:.2f}%)")
+        target_val = summary.get("target_bricks", 2.0)
+        print(f"  - Winning Days (+{target_val} bricks target): {summary['winning_days']} ({summary['win_rate']:.2f}%)")
         print(f"  - Losing/Flat Days: {summary['losing_days']}")
         print(f"  - Average Time to Success: {summary['avg_success_time']}")
         print(f"  - Max Daily Drawdown: {summary['max_drawdown_bricks']:.2f} bricks")
@@ -1035,6 +2360,119 @@ def run_optimization(data, annotations):
                             
     return best_config
 
+def yellow_momentum_config_slice(config):
+    keys = [
+        "yellow_momentum_slope_period",
+        "yellow_momentum_fast_slope_threshold",
+        "yellow_momentum_slow_slope_threshold",
+        "yellow_momentum_min_ema_gap",
+        "yellow_momentum_min_penetration",
+        "yellow_momentum_min_tail",
+        "yellow_momentum_arity_lookback",
+        "yellow_momentum_max_overlap",
+        "yellow_momentum_max_reversals",
+    ]
+    return {key: config[key] for key in keys}
+
+def score_yellow_momentum_candidate(campaign_results, signal_count, min_trades):
+    summary = campaign_results.get("summary", {})
+    trades = summary.get("total_trades", 0)
+    net = summary.get("net_profit_bricks", 0.0)
+    win_rate = summary.get("trade_win_rate", 0.0) / 100.0
+    max_drawdown = abs(summary.get("max_drawdown_bricks", 0.0))
+    too_few_trades_penalty = max(0, min_trades - trades) * 2.5
+    too_many_signals_penalty = max(0, signal_count - 45) * 0.02
+
+    return (
+        net +
+        win_rate * 1.5 +
+        min(trades, 12) * 0.05 -
+        max_drawdown * 0.75 -
+        too_few_trades_penalty -
+        too_many_signals_penalty
+    )
+
+def run_yellow_momentum_optimization(data, base_config):
+    min_trades = 4
+    search_space = {
+        "yellow_momentum_slope_period": [6, 8, 10],
+        "yellow_momentum_fast_slope_threshold": [24.0, 30.0, 36.0],
+        "yellow_momentum_slow_slope_threshold": [18.0, 24.0, 30.0],
+        "yellow_momentum_min_ema_gap": [2.0, 4.0, 6.0, 8.0],
+        "yellow_momentum_min_penetration": [0.5, 1.5, 2.5],
+        "yellow_momentum_min_tail": [1.0, 2.0, 3.0],
+        "yellow_momentum_arity_lookback": [6, 8, 10],
+        "yellow_momentum_max_overlap": [0.65, 0.95, 1.15],
+        "yellow_momentum_max_reversals": [2, 3, 5],
+    }
+
+    keys = list(search_space.keys())
+    arity_cache = precompute_arity_metrics(data, search_space["yellow_momentum_arity_lookback"])
+    feature_cache = build_yellow_momentum_feature_cache(
+        data,
+        search_space["yellow_momentum_slope_period"],
+        search_space["yellow_momentum_arity_lookback"],
+        arity_cache
+    )
+    outcome_cache = build_yellow_momentum_outcome_cache(data, base_config)
+    campaign_rules = {
+        "entry": "Close of yellow momentum signal bar",
+        "stop": "One range against entry",
+        "target": "One range in favor",
+        "range_size": infer_range_size(data),
+        "tick_size": infer_price_increment(data),
+    }
+    top_results = []
+    tested_configs = 0
+    qualified_configs = 0
+
+    for values in product(*(search_space[key] for key in keys)):
+        cfg = base_config.copy()
+        cfg.update(dict(zip(keys, values)))
+        if cfg["yellow_momentum_slow_slope_threshold"] > cfg["yellow_momentum_fast_slope_threshold"]:
+            continue
+
+        tested_configs += 1
+        features = feature_cache[(cfg["yellow_momentum_slope_period"], cfg["yellow_momentum_arity_lookback"])]
+        signal_details = filter_yellow_momentum_features(features, cfg)
+        campaign_results = run_yellow_momentum_campaign_from_cache(data, signal_details, cfg, outcome_cache, campaign_rules)
+        summary = campaign_results.get("summary", {})
+        trades = summary.get("total_trades", 0)
+        if trades >= min_trades:
+            qualified_configs += 1
+
+        score = score_yellow_momentum_candidate(campaign_results, len(signal_details), min_trades)
+        candidate = {
+            "score": score,
+            "signal_count": len(signal_details),
+            "config": yellow_momentum_config_slice(cfg),
+            "summary": summary,
+        }
+        top_results.append(candidate)
+        top_results.sort(key=lambda item: item["score"], reverse=True)
+        top_results = top_results[:15]
+
+    best = top_results[0] if top_results else None
+    best_config = base_config.copy()
+    if best:
+        best_config.update(best["config"])
+    best_features = feature_cache[(best_config["yellow_momentum_slope_period"], best_config["yellow_momentum_arity_lookback"])]
+    best_signal_details = filter_yellow_momentum_features(best_features, best_config)
+    best_campaign_results = run_yellow_momentum_campaign_from_cache(data, best_signal_details, best_config, outcome_cache, campaign_rules)
+
+    return {
+        "objective": "Maximize Yellow Momentum 1:1 net ranges with penalties for too few trades, drawdown, and noisy signal count.",
+        "min_trades": min_trades,
+        "tested_configs": tested_configs,
+        "qualified_configs": qualified_configs,
+        "search_space": search_space,
+        "best_config": yellow_momentum_config_slice(best_config),
+        "best_summary": best_campaign_results.get("summary", {}),
+        "best_rules": best_campaign_results.get("rules", {}),
+        "best_signal_count": len(best_signal_details),
+        "top_results": top_results,
+    }
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Renko Strategy Backtester & Annotation Alignment Engine")
     parser.add_argument("--chart", required=True, help="Name of the chart file inside data/ (without .json)")
@@ -1046,7 +2484,7 @@ if __name__ == "__main__":
     parser.add_argument("--max-ema-dist", type=float, help="Override maximum EMA distance (proximity)")
     parser.add_argument("--cooldown-bars", type=int, help="Override time cool-down in bars")
     parser.add_argument("--wick-body-offset", type=int, help="Override wick body open offset in ticks (positive=deeper, negative=shallower)")
-    parser.add_argument("--exit-strategy", choices=["fixed", "trail", "stepup"], default="fixed", help="Exit strategy for daily campaign ('fixed' target, 'trail' to opposite brick, or 'stepup' on loss)")
+    parser.add_argument("--exit-strategy", choices=["fixed", "trail", "stepup", "fixed2"], default="fixed", help="Exit strategy for daily campaign ('fixed' target, 'trail' to opposite brick, 'stepup' on loss, or 'fixed2' optimized target)")
     parser.add_argument("--start-time", default="06:31:00", help="Start time of daily trading session (PST, HH:MM:SS)")
     parser.add_argument("--end-time", default="11:00:00", help="End time of daily trading session (PST, HH:MM:SS)")
     parser.add_argument("--arid-lookback", type=int, help="Signal Set 2 lookback in bricks")
@@ -1054,12 +2492,24 @@ if __name__ == "__main__":
     parser.add_argument("--arid-max-reversals", type=int, help="Signal Set 2 maximum direction reversals in the lookback")
     parser.add_argument("--arid-slope-threshold", type=float, help="Signal Set 2 minimum EMA change over its slope period")
     parser.add_argument("--arid-min-gap", type=float, help="Signal Set 2 minimum full-wick distance from EMA in bricks")
+    parser.add_argument("--bounce-type", choices=["all", "yellow", "green"], default="all", help="Signal Set 2 bounce type filter")
     parser.add_argument("--set3-left-lookback", type=int, help="Signal Set 3 bars inspected for left-side congestion")
     parser.add_argument("--set3-max-left-overlaps", type=int, help="Signal Set 3 maximum older bodies overlapping the setup")
     parser.add_argument("--set3-slope-threshold", type=float, help="Signal Set 3 minimum EMA change over its slope period")
     parser.add_argument("--set3-min-gap", type=float, help="Signal Set 3 minimum body distance from EMA in bricks")
+    parser.add_argument("--set3-synthetic-min-gap", type=float, help="Signal Set 3 minimum synthetic pullback distance from EMA in bricks")
+    parser.add_argument("--yellow-slope-period", type=int, help="Yellow Momentum EMA slope lookback in bars")
+    parser.add_argument("--yellow-fast-slope", type=float, help="Yellow Momentum minimum 5 EMA change over slope period")
+    parser.add_argument("--yellow-slow-slope", type=float, help="Yellow Momentum minimum 10 EMA change over slope period")
+    parser.add_argument("--yellow-min-gap", type=float, help="Yellow Momentum minimum separation between 5 EMA and 10 EMA")
+    parser.add_argument("--yellow-min-penetration", type=float, help="Yellow Momentum minimum yellow EMA penetration by the tail")
+    parser.add_argument("--yellow-min-tail", type=float, help="Yellow Momentum minimum rejection tail length")
+    parser.add_argument("--yellow-arity-lookback", type=int, help="Yellow Momentum arity lookback in bars")
+    parser.add_argument("--yellow-max-overlap", type=float, help="Yellow Momentum maximum average recent overlap")
+    parser.add_argument("--yellow-max-reversals", type=int, help="Yellow Momentum maximum recent direction reversals")
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
+    parser.add_argument("--optimize-yellow-momentum", action="store_true", help="Run Yellow Momentum 1:1 parameter optimization sweep")
     
     args = parser.parse_args()
  
@@ -1091,6 +2541,7 @@ if __name__ == "__main__":
         config["arid_ema_slope_threshold"] = args.arid_slope_threshold
     if args.arid_min_gap is not None:
         config["arid_min_ema_gap_bricks"] = args.arid_min_gap
+    config["bounce_type_filter"] = args.bounce_type
     if args.set3_left_lookback is not None:
         config["set3_left_lookback"] = args.set3_left_lookback
     if args.set3_max_left_overlaps is not None:
@@ -1099,6 +2550,26 @@ if __name__ == "__main__":
         config["set3_ema_slope_threshold"] = args.set3_slope_threshold
     if args.set3_min_gap is not None:
         config["set3_min_ema_gap_bricks"] = args.set3_min_gap
+    if args.set3_synthetic_min_gap is not None:
+        config["set3_synthetic_min_ema_gap_bricks"] = args.set3_synthetic_min_gap
+    if args.yellow_slope_period is not None:
+        config["yellow_momentum_slope_period"] = args.yellow_slope_period
+    if args.yellow_fast_slope is not None:
+        config["yellow_momentum_fast_slope_threshold"] = args.yellow_fast_slope
+    if args.yellow_slow_slope is not None:
+        config["yellow_momentum_slow_slope_threshold"] = args.yellow_slow_slope
+    if args.yellow_min_gap is not None:
+        config["yellow_momentum_min_ema_gap"] = args.yellow_min_gap
+    if args.yellow_min_penetration is not None:
+        config["yellow_momentum_min_penetration"] = args.yellow_min_penetration
+    if args.yellow_min_tail is not None:
+        config["yellow_momentum_min_tail"] = args.yellow_min_tail
+    if args.yellow_arity_lookback is not None:
+        config["yellow_momentum_arity_lookback"] = args.yellow_arity_lookback
+    if args.yellow_max_overlap is not None:
+        config["yellow_momentum_max_overlap"] = args.yellow_max_overlap
+    if args.yellow_max_reversals is not None:
+        config["yellow_momentum_max_reversals"] = args.yellow_max_reversals
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")
@@ -1113,12 +2584,22 @@ if __name__ == "__main__":
             print(json.dumps(best_config, indent=2))
             import sys
             sys.exit(0)
+        if args.optimize_yellow_momentum:
+            optimization_results = run_yellow_momentum_optimization(data, config)
+            print(json.dumps(optimization_results, indent=2))
+            import sys
+            sys.exit(0)
             
         signals, signal_details, signal_evaluations = run_strategy(data, config)
-        signal_set_2_details, signal_set_2_evaluations = run_arid_strategy(data, config)
-        signal_set_3_details, signal_set_3_evaluations = run_no_tail_arity_strategy(data, config)
+        signal_set_2_details, signal_set_2_evaluations = run_ema_bounce_strategy(data, config)
+        signal_set_3_details, signal_set_3_evaluations, arid_e_trades = run_no_tail_arity_strategy(data, config)
+        yellow_momentum_details, yellow_momentum_evaluations = run_yellow_momentum_strategy(data, config)
+        mes3_trend_tail_details, mes3_trend_tail_evaluations = run_mes3_trend_tail_strategy(data, config)
+        mes3_previous_tail_details, mes3_previous_tail_evaluations = run_mes3_previous_tail_rejection_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         campaign_results = run_daily_campaign(data, signal_details, config, exit_strategy=args.exit_strategy)
+        ema_bounce_campaign_results = run_ema_bounce_campaign(data, signal_set_2_details, config)
+        yellow_momentum_campaign_results = run_yellow_momentum_campaign(data, yellow_momentum_details, config)
         
         if args.json:
             result = {
@@ -1129,7 +2610,16 @@ if __name__ == "__main__":
                 "signal_set_2_evaluations": signal_set_2_evaluations,
                 "signal_set_3_details": signal_set_3_details,
                 "signal_set_3_evaluations": signal_set_3_evaluations,
+                "arid_e_trades": arid_e_trades,
+                "yellow_momentum_details": yellow_momentum_details,
+                "yellow_momentum_evaluations": yellow_momentum_evaluations,
+                "mes3_trend_tail_details": mes3_trend_tail_details,
+                "mes3_trend_tail_evaluations": mes3_trend_tail_evaluations,
+                "mes3_previous_tail_details": mes3_previous_tail_details,
+                "mes3_previous_tail_evaluations": mes3_previous_tail_evaluations,
                 "campaign_results": campaign_results,
+                "ema_bounce_campaign_results": ema_bounce_campaign_results,
+                "yellow_momentum_campaign_results": yellow_momentum_campaign_results,
                 "config": config,
                 "alignment": {
                     "matches_count": len(matches),
