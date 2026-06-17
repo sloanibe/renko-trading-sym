@@ -828,6 +828,638 @@
         "close": 7562.75,
         "ema": 7560.6722
       }
+    },
+    {
+      "timestamp": "2026-06-16T08:35:00",
+      "barIndex": 89195,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 7547,
+        "high": 7547.75,
+        "low": 7546.25,
+        "close": 7547.75,
+        "ema": 7546.3474
+      }
+    },
+    {
+      "timestamp": "2026-06-16T08:43:51",
+      "barIndex": 89216,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 7541,
+        "high": 7542.25,
+        "low": 7540.25,
+        "close": 7540.25,
+        "ema": 7541.7213
+      }
+    },
+    {
+      "timestamp": "2026-06-16T08:46:23",
+      "barIndex": 89222,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 7538,
+        "high": 7539,
+        "low": 7537.25,
+        "close": 7537.25,
+        "ema": 7539.335
+      }
+    },
+    {
+      "timestamp": "2026-06-16T08:51:46",
+      "barIndex": 89247,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 7539.5,
+        "high": 7540.25,
+        "low": 7538.5,
+        "close": 7540.25,
+        "ema": 7539.3153
+      }
+    },
+    {
+      "timestamp": "2026-06-16T08:52:38",
+      "barIndex": 89254,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 7541.75,
+        "high": 7542.5,
+        "low": 7540.75,
+        "close": 7542.5,
+        "ema": 7541.4143
+      }
+    },
+    {
+      "timestamp": "2026-06-16T09:05:32",
+      "barIndex": 89293,
+      "action": "Buy",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 7550,
+        "high": 7550.75,
+        "low": 7549,
+        "close": 7550.75,
+        "ema": 7549.6383
+      }
+    },
+    {
+      "timestamp": "2026-06-16T12:10:37",
+      "barIndex": 89602,
+      "action": "Sell",
+      "markerSet": "Raw Range Bar Set",
+      "comment": "",
+      "metrics": {
+        "open": 7529,
+        "high": 7530,
+        "low": 7528.25,
+        "close": 7528.25,
+        "ema": 7529.8386
+      }
+    }
+  ],
+  "MESM_reg_5": [
+    {
+      "timestamp": "2026-06-17T06:30:24",
+      "barIndex": 113434,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Too far away from the moving average.",
+      "metrics": {
+        "open": 7521.25,
+        "high": 7521.75,
+        "low": 7520.5,
+        "close": 7520.5,
+        "ema": 7522.5716
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:31:58",
+      "barIndex": 113451,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Too far away from the moving average.",
+      "metrics": {
+        "open": 7518.5,
+        "high": 7518.75,
+        "low": 7517.5,
+        "close": 7517.5,
+        "ema": 7519.2788
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:35:15",
+      "barIndex": 113476,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Should have caught this strong bounce but didn't off a strong moving EMA.",
+      "metrics": {
+        "open": 7520,
+        "high": 7520.25,
+        "low": 7519,
+        "close": 7520.25,
+        "ema": 7519.8075
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:35:43",
+      "barIndex": 113478,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Too far away from the moving average",
+      "metrics": {
+        "open": 7521.5,
+        "high": 7522.5,
+        "low": 7521.25,
+        "close": 7522.5,
+        "ema": 7520.6552
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:38:55",
+      "barIndex": 113503,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Far away from the moving average.",
+      "metrics": {
+        "open": 7517.5,
+        "high": 7518.25,
+        "low": 7517,
+        "close": 7517,
+        "ema": 7519.2334
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:41:27",
+      "barIndex": 113526,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Far away from the moving average",
+      "metrics": {
+        "open": 7522.25,
+        "high": 7522.75,
+        "low": 7521.5,
+        "close": 7522.75,
+        "ema": 7520.8872
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:41:52",
+      "barIndex": 113528,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Bounce off of strongly trending EMA",
+      "metrics": {
+        "open": 7521.5,
+        "high": 7522.25,
+        "low": 7521,
+        "close": 7522.25,
+        "ema": 7521.3392
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:43:50",
+      "barIndex": 113538,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Near bounce off strongly trending EMA",
+      "metrics": {
+        "open": 7525.25,
+        "high": 7526,
+        "low": 7524.75,
+        "close": 7526,
+        "ema": 7524.5448
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:56:12",
+      "barIndex": 113610,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "I should have caught this nice bounce against a strong moving average.",
+      "metrics": {
+        "open": 7525,
+        "high": 7525.75,
+        "low": 7524.5,
+        "close": 7524.5,
+        "ema": 7525.4077
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:56:19",
+      "barIndex": 113611,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Too far away from the moving average.",
+      "metrics": {
+        "open": 7524.25,
+        "high": 7524.5,
+        "low": 7523.25,
+        "close": 7523.25,
+        "ema": 7524.9282
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:56:37",
+      "barIndex": 113614,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Should have caught this nice bounce against a strong moving average.",
+      "metrics": {
+        "open": 7524.5,
+        "high": 7524.5,
+        "low": 7523.25,
+        "close": 7523.25,
+        "ema": 7524.246
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:56:57",
+      "barIndex": 113616,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Far away from the moving average.",
+      "metrics": {
+        "open": 7522,
+        "high": 7522.5,
+        "low": 7521.25,
+        "close": 7521.25,
+        "ema": 7523.2353
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:57:10",
+      "barIndex": 113617,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Far away from the moving average.",
+      "metrics": {
+        "open": 7521,
+        "high": 7521.75,
+        "low": 7520.5,
+        "close": 7520.5,
+        "ema": 7522.6274
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:57:14",
+      "barIndex": 113618,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "",
+      "metrics": {
+        "open": 7520.25,
+        "high": 7521.25,
+        "low": 7520,
+        "close": 7520,
+        "ema": 7522.0436
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:58:07",
+      "barIndex": 113626,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Bounce off strongly trending EMA.",
+      "metrics": {
+        "open": 7517.25,
+        "high": 7517.5,
+        "low": 7516.25,
+        "close": 7516.25,
+        "ema": 7517.3894
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:04:48",
+      "barIndex": 113686,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Really bad buy signal off a non-steep moving average.",
+      "metrics": {
+        "open": 7517,
+        "high": 7517.75,
+        "low": 7516.5,
+        "close": 7517.75,
+        "ema": 7517.1561
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:07:01",
+      "barIndex": 113703,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Bounce off strongly trending EMA",
+      "metrics": {
+        "open": 7517.25,
+        "high": 7518,
+        "low": 7516.75,
+        "close": 7518,
+        "ema": 7517.4228
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:07:23",
+      "barIndex": 113706,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "Oh I already hear clumping going on.",
+      "metrics": {
+        "open": 7517.75,
+        "high": 7518.75,
+        "low": 7517.5,
+        "close": 7518.75,
+        "ema": 7518.0295
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:08:05",
+      "barIndex": 113713,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "It's off strongly trending EMA.",
+      "metrics": {
+        "open": 7520.5,
+        "high": 7521.25,
+        "low": 7520,
+        "close": 7521.25,
+        "ema": 7520.4089
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:15:33",
+      "barIndex": 113764,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "This is strongly trending EMA.",
+      "metrics": {
+        "open": 7526.25,
+        "high": 7526.5,
+        "low": 7525.25,
+        "close": 7526.5,
+        "ema": 7525.7961
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:23:58",
+      "barIndex": 113805,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Long tail in strong trend.",
+      "metrics": {
+        "open": 7529.75,
+        "high": 7530,
+        "low": 7528.75,
+        "close": 7530,
+        "ema": 7528.5797
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:31:05",
+      "barIndex": 113845,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "May bounce in strong trend.",
+      "metrics": {
+        "open": 7528.25,
+        "high": 7528.5,
+        "low": 7527.25,
+        "close": 7527.25,
+        "ema": 7528.3586
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:31:21",
+      "barIndex": 113848,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Near EMA bounce in strong trend",
+      "metrics": {
+        "open": 7526.75,
+        "high": 7526.75,
+        "low": 7525.5,
+        "close": 7525.5,
+        "ema": 7527.085
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:32:27",
+      "barIndex": 113853,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Long tail and strong trend.",
+      "metrics": {
+        "open": 7524.5,
+        "high": 7525.25,
+        "low": 7524,
+        "close": 7524,
+        "ema": 7525.2558
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:33:29",
+      "barIndex": 113859,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Near EMA bounce and strong trend",
+      "metrics": {
+        "open": 7521.25,
+        "high": 7521.25,
+        "low": 7520,
+        "close": 7520,
+        "ema": 7521.7207
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:36:13",
+      "barIndex": 113879,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Tail and strong trend",
+      "metrics": {
+        "open": 7516.75,
+        "high": 7517.5,
+        "low": 7516.25,
+        "close": 7516.25,
+        "ema": 7518.5445
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:40:20",
+      "barIndex": 113907,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "",
+      "metrics": {
+        "open": 7512.25,
+        "high": 7513,
+        "low": 7511.75,
+        "close": 7511.75,
+        "ema": 7513.8481
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:40:46",
+      "barIndex": 113912,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "No arity clumping.",
+      "metrics": {
+        "open": 7511.75,
+        "high": 7512.25,
+        "low": 7511,
+        "close": 7511,
+        "ema": 7511.9215
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:41:08",
+      "barIndex": 113916,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Near EMA bounce",
+      "metrics": {
+        "open": 7510,
+        "high": 7510,
+        "low": 7508.75,
+        "close": 7508.75,
+        "ema": 7510.3486
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:47:17",
+      "barIndex": 113983,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "One of strongly trending EMA",
+      "metrics": {
+        "open": 7506.75,
+        "high": 7507.75,
+        "low": 7506.5,
+        "close": 7506.5,
+        "ema": 7507.8328
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:47:23",
+      "barIndex": 113999,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "EMA too weak and clumping, no arity.",
+      "metrics": {
+        "open": 7505.75,
+        "high": 7506.25,
+        "low": 7505,
+        "close": 7505,
+        "ema": 7505.2985
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:47:29",
+      "barIndex": 114017,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "Nair bounce off strongly trending EMA.",
+      "metrics": {
+        "open": 7500.25,
+        "high": 7500.5,
+        "low": 7499.25,
+        "close": 7499.25,
+        "ema": 7500.7855
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:47:46",
+      "barIndex": 114055,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "No aridy here. Bars are clumped together.",
+      "metrics": {
+        "open": 7497.25,
+        "high": 7498.5,
+        "low": 7497.25,
+        "close": 7498.5,
+        "ema": 7497.5881
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:48:03",
+      "barIndex": 114078,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Tail and strong trend",
+      "metrics": {
+        "open": 7502,
+        "high": 7502.25,
+        "low": 7501,
+        "close": 7502.25,
+        "ema": 7500.9267
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:49:10",
+      "barIndex": 114115,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "No trade here, no Arity. Bars are clumped together.",
+      "metrics": {
+        "open": 7505.25,
+        "high": 7506.25,
+        "low": 7505,
+        "close": 7506.25,
+        "ema": 7505.5388
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:49:34",
+      "barIndex": 114122,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Long tail and strong trend",
+      "metrics": {
+        "open": 7509.25,
+        "high": 7509.5,
+        "low": 7508.25,
+        "close": 7509.5,
+        "ema": 7507.6495
+      }
+    },
+    {
+      "timestamp": "2026-06-17T07:52:37",
+      "barIndex": 114172,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Strongly trending EMA bounce",
+      "metrics": {
+        "open": 7511.75,
+        "high": 7512.75,
+        "low": 7511.5,
+        "close": 7512.75,
+        "ema": 7511.3346
+      }
+    },
+    {
+      "timestamp": "2026-06-17T08:34:02",
+      "barIndex": 114446,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Best type of signal, extremely strong EMA with tail.",
+      "metrics": {
+        "open": 7518.25,
+        "high": 7518.75,
+        "low": 7517.5,
+        "close": 7518.75,
+        "ema": 7517.6014
+      }
     }
   ]
 }

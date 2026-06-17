@@ -17,6 +17,12 @@ const CAMPAIGN_OPTIONS = {
     entryFlag: 'isEmaBounceCampaignEntry',
     exitFlag: 'isEmaBounceCampaignExit',
   },
+  mesReg5Recovery: {
+    label: 'MES Reg5 Daily Recovery',
+    resultKey: 'mes_reg5_daily_recovery_campaign_results',
+    entryFlag: 'isMesReg5RecoveryCampaignEntry',
+    exitFlag: 'isMesReg5RecoveryCampaignExit',
+  },
   dailyTarget: {
     label: 'Daily Target Campaign',
     resultKey: 'campaign_results',
@@ -25,8 +31,18 @@ const CAMPAIGN_OPTIONS = {
   },
 };
 const bookmarkStorageKey = chartName => `renko-bookmark:${chartName}`;
+const MARKER_SETTINGS_STORAGE_KEY = 'renko-marker-settings';
 const defaultMarkerSetForChart = chartName =>
   chartName?.includes('Range') || chartName === 'MES3' ? RAW_RANGE_MARKER_SET : 'Training Set';
+
+const loadMarkerSettings = () => {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem(MARKER_SETTINGS_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+};
 
 const metricsMatchBrick = (metrics, brick) => {
   if (!metrics || !brick) return false;
@@ -47,10 +63,13 @@ const annotationMatchesBrick = (annotation, brick) => {
 };
 
 export default function App() {
+  const savedMarkerSettings = React.useMemo(loadMarkerSettings, []);
   const [charts, setCharts] = useState([]);
   const [activeChart, setActiveChart] = useState('');
+  const isRegularCandlestick = activeChart?.toLowerCase().includes('reg');
   const [chartData, setChartData] = useState([]);
   const [secondaryChartData, setSecondaryChartData] = useState([]);
+  const [showSecondaryPane, setShowSecondaryPane] = useState(savedMarkerSettings.showSecondaryPane ?? true);
   const [currentHaSelection, setCurrentHaSelection] = useState(null);
   const [allAnnotations, setAllAnnotations] = useState({});
   const [selectedBrick, setSelectedBrick] = useState(null);
@@ -70,14 +89,17 @@ export default function App() {
   const [wickBodyOffset, setWickBodyOffset] = useState(0);
   const [sessionStartTime, setSessionStartTime] = useState('06:31:00');
   const [exitStrategy, setExitStrategy] = useState('fixed'); // 'fixed', 'trail', or 'stepup' (Fixed Target by default)
-  const [showTrainingAnnotations, setShowTrainingAnnotations] = useState(false);
-  const [showRawSignals, setShowRawSignals] = useState(false);
-  const [showSignalSet2, setShowSignalSet2] = useState(true);
-  const [showSignalSet3, setShowSignalSet3] = useState(true);
-  const [showMes3TrendTailSignals, setShowMes3TrendTailSignals] = useState(false);
-  const [showMes3PreviousTailSignals, setShowMes3PreviousTailSignals] = useState(true);
-  const [showCampaignTrades, setShowCampaignTrades] = useState(true);
-  const [campaignView, setCampaignView] = useState('yellowMomentum');
+  const [showTrainingAnnotations, setShowTrainingAnnotations] = useState(savedMarkerSettings.showTrainingAnnotations ?? false);
+  const [showRawSignals, setShowRawSignals] = useState(savedMarkerSettings.showRawSignals ?? false);
+  const [showSignalSet2, setShowSignalSet2] = useState(savedMarkerSettings.showSignalSet2 ?? true);
+  const [showSignalSet3, setShowSignalSet3] = useState(savedMarkerSettings.showSignalSet3 ?? true);
+  const [showMes3TrendTailSignals, setShowMes3TrendTailSignals] = useState(savedMarkerSettings.showMes3TrendTailSignals ?? false);
+  const [showMes3PreviousTailSignals, setShowMes3PreviousTailSignals] = useState(savedMarkerSettings.showMes3PreviousTailSignals ?? true);
+  const [showMes3HaEmaApproachSignals, setShowMes3HaEmaApproachSignals] = useState(savedMarkerSettings.showMes3HaEmaApproachSignals ?? true);
+  const [showMesReg5LongTailSignals, setShowMesReg5LongTailSignals] = useState(savedMarkerSettings.showMesReg5LongTailSignals ?? true);
+  const [showMesReg5EmaBounceAritySignals, setShowMesReg5EmaBounceAritySignals] = useState(savedMarkerSettings.showMesReg5EmaBounceAritySignals ?? true);
+  const [showCampaignTrades, setShowCampaignTrades] = useState(savedMarkerSettings.showCampaignTrades ?? true);
+  const [campaignView, setCampaignView] = useState(savedMarkerSettings.campaignView ?? 'yellowMomentum');
   const [aridLookback, setAridLookback] = useState(8);
   const [aridMaxOverlap, setAridMaxOverlap] = useState(0.95);
   const [aridMaxReversals, setAridMaxReversals] = useState(5);
@@ -251,6 +273,8 @@ export default function App() {
   const [selectedMarkerSet, setSelectedMarkerSet] = useState('');
   const [commentText, setCommentText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [isCreatingNewSet, setIsCreatingNewSet] = useState(false);
+  const [visibleMarkerSets, setVisibleMarkerSets] = useState({});
 
   // Draggable Modal state
   const [modalPosition, setModalPosition] = useState({ x: 100, y: 100 });
@@ -314,16 +338,53 @@ export default function App() {
     }
   }, [activeChart]);
 
+  useEffect(() => {
+    if (activeChart === 'MESM_reg_5' && campaignView !== 'mesReg5Recovery') {
+      setCampaignView('mesReg5Recovery');
+    }
+  }, [activeChart, campaignView]);
+
+  useEffect(() => {
+    localStorage.setItem(MARKER_SETTINGS_STORAGE_KEY, JSON.stringify({
+      showTrainingAnnotations,
+      showRawSignals,
+      showSignalSet2,
+      showSignalSet3,
+      showMes3TrendTailSignals,
+      showMes3PreviousTailSignals,
+      showMes3HaEmaApproachSignals,
+      showMesReg5LongTailSignals,
+      showMesReg5EmaBounceAritySignals,
+      showCampaignTrades,
+      showSecondaryPane,
+      campaignView,
+    }));
+  }, [
+    showTrainingAnnotations,
+    showRawSignals,
+    showSignalSet2,
+    showSignalSet3,
+    showMes3TrendTailSignals,
+    showMes3PreviousTailSignals,
+    showMes3HaEmaApproachSignals,
+    showMesReg5LongTailSignals,
+    showMesReg5EmaBounceAritySignals,
+    showCampaignTrades,
+    showSecondaryPane,
+    campaignView,
+  ]);
+
   // Fetch chart data and backtest when active selection changes or when configuration is adjusted
   useEffect(() => {
     if (activeChart) {
       fetchChartData(activeChart);
-      if (activeChart === 'MES3') {
+      if (activeChart === 'MES3' || activeChart === 'MESM_reg_5') {
         fetchSecondaryChartData('MES_2sec_HA');
       } else {
         setSecondaryChartData([]);
         setCurrentHaSelection(null);
       }
+      // Keep user's saved showSecondaryPane setting
       fetchBacktest(activeChart);
       const savedBookmark = localStorage.getItem(bookmarkStorageKey(activeChart));
       try {
@@ -543,6 +604,7 @@ export default function App() {
     }
     
     setSelectedBrick(brick);
+    setIsCreatingNewSet(false);
     if (existing) {
       setSelectedAction(existing.action);
       setSelectedMarkerSet(existing.markerSet || defaultMarkerSetForChart(activeChart));
@@ -568,7 +630,7 @@ export default function App() {
 
     if (clickPoint) {
       const modalWidth = 320;
-      const modalHeight = 310;
+      const modalHeight = 330;
 
       // Determine if click point is in the right half of the viewport
       const isRightHalf = clickPoint.x > window.innerWidth / 2;
@@ -585,7 +647,7 @@ export default function App() {
     } else {
       // Fallback: center in screen
       const width = 320;
-      const height = 310;
+      const height = 330;
       const x = Math.max(20, (window.innerWidth - width) / 2);
       const y = Math.max(20, (window.innerHeight - height) / 2);
       setModalPosition({ x, y });
@@ -708,6 +770,17 @@ export default function App() {
 
   const savedAnnotations = allAnnotations[activeChart] || [];
 
+  // Get all unique marker sets available in the saved annotations
+  const availableMarkerSets = React.useMemo(() => {
+    const sets = new Set([RAW_RANGE_MARKER_SET, 'Training Set']);
+    savedAnnotations.forEach(ann => {
+      if (ann.markerSet) {
+        sets.add(ann.markerSet);
+      }
+    });
+    return [...sets].sort();
+  }, [savedAnnotations]);
+
   // Construct annotations to pass to ChartComponent, including a temporary preview if the modal is open
   const currentAnnotations = React.useMemo(() => {
     if (!modalOpen || !selectedBrick) {
@@ -743,12 +816,21 @@ export default function App() {
     }
   }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, selectedMarkerSet, commentText, activeChart]);
 
+  // Filtered annotations based on visibleMarkerSets state
+  const filteredManualAnnotations = React.useMemo(() => {
+    return currentAnnotations.filter(ann => {
+      if (ann.isPreview) return true;
+      const set = ann.markerSet || defaultMarkerSetForChart(activeChart);
+      return visibleMarkerSets[set] !== false;
+    });
+  }, [currentAnnotations, visibleMarkerSets, activeChart]);
+
   // Merge user annotations, system signals, and campaign trades for chart display
   const mergedAnnotations = React.useMemo(() => {
-    const shouldShowManualAnnotations = showTrainingAnnotations || activeChart === 'MES3' || modalOpen;
+    const shouldShowManualAnnotations = showTrainingAnnotations || modalOpen;
     const merged = shouldShowManualAnnotations
-      ? [...currentAnnotations]
-      : currentAnnotations.filter(annotation => annotation.isPreview);
+      ? [...filteredManualAnnotations]
+      : filteredManualAnnotations.filter(annotation => annotation.isPreview);
     
     // 1. Add every raw strategy signal, including signals skipped by the campaign.
     if (showRawSignals && backtestResults?.signal_details) {
@@ -818,7 +900,7 @@ export default function App() {
       });
     }
 
-    if (showMes3TrendTailSignals && activeChart === 'MES3' && backtestResults?.mes3_trend_tail_details) {
+    if (showMes3TrendTailSignals && (activeChart === 'MES3' || activeChart === 'MESM_reg_5') && backtestResults?.mes3_trend_tail_details) {
       backtestResults.mes3_trend_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
         const evaluation = backtestResults.mes3_trend_tail_evaluations?.find(
           ev => ev.barIndex === barIndex && ev.direction === action
@@ -837,7 +919,7 @@ export default function App() {
       });
     }
 
-    if (showMes3PreviousTailSignals && activeChart === 'MES3' && backtestResults?.mes3_previous_tail_details) {
+    if (showMes3PreviousTailSignals && (activeChart === 'MES3' || activeChart === 'MESM_reg_5') && backtestResults?.mes3_previous_tail_details) {
       backtestResults.mes3_previous_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
         const evaluation = backtestResults.mes3_previous_tail_evaluations?.find(
           ev => ev.barIndex === barIndex && ev.direction === action
@@ -855,13 +937,61 @@ export default function App() {
         });
       });
     }
+
+    if (showMes3HaEmaApproachSignals && (activeChart === 'MES3' || activeChart === 'MESM_reg_5') && backtestResults?.mes3_ha_ema_approach_details) {
+      backtestResults.mes3_ha_ema_approach_details.forEach(({ barIndex, timestamp, action, metrics }) => {
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          signalSet: 6,
+          setupType: 'mes3HaEmaApproachIndecisionBreakout',
+          metrics,
+          comment: 'MES3 HA indecision breakout near Renko EMA',
+          evaluationResult: 'Study',
+        });
+      });
+    }
+
+    if (showMesReg5LongTailSignals && activeChart === 'MESM_reg_5' && backtestResults?.mes_reg5_long_tail_details) {
+      backtestResults.mes_reg5_long_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          signalSet: 7,
+          setupType: 'mesReg5LongTail',
+          metrics,
+          comment: 'MES Reg5 Long Tail in strong trend',
+          evaluationResult: 'Study',
+        });
+      });
+    }
+
+    if (showMesReg5EmaBounceAritySignals && activeChart === 'MESM_reg_5' && backtestResults?.mes_reg5_ema_bounce_arity_details) {
+      backtestResults.mes_reg5_ema_bounce_arity_details.forEach(({ barIndex, timestamp, action, metrics }) => {
+        merged.push({
+          timestamp,
+          barIndex,
+          action,
+          isSystem: true,
+          signalSet: 8,
+          setupType: 'mesReg5EmaBounceArity',
+          metrics,
+          comment: 'MES Reg5 EMA Bounce with Arity',
+          evaluationResult: 'Study',
+        });
+      });
+    }
     
     // 2. Add selected campaign trade markers (entries & exits) for the latest traded day.
     if (showCampaignTrades) {
       const selectedCampaign = CAMPAIGN_OPTIONS[campaignView] || CAMPAIGN_OPTIONS.yellowMomentum;
       const reports = backtestResults?.[selectedCampaign.resultKey]?.daily_reports;
-      const latestDay = reports?.[reports.length - 1];
-      latestDay?.trades?.forEach((trade, idx) => {
+      reports?.forEach(day => {
+        day.trades?.forEach((trade, idx) => {
         merged.push({
           timestamp: trade.entry_time,
           barIndex: trade.entry_barIndex,
@@ -883,10 +1013,11 @@ export default function App() {
           comment: `${selectedCampaign.label} exit #${idx + 1} (${trade.result})`,
         });
       });
+      });
     }
     
     return merged;
-  }, [currentAnnotations, backtestResults, showTrainingAnnotations, showRawSignals, showSignalSet2, showSignalSet3, showMes3TrendTailSignals, showMes3PreviousTailSignals, showCampaignTrades, campaignView, activeChart, modalOpen]);
+  }, [filteredManualAnnotations, backtestResults, showTrainingAnnotations, showRawSignals, showSignalSet2, showSignalSet3, showMes3TrendTailSignals, showMes3PreviousTailSignals, showMes3HaEmaApproachSignals, showMesReg5LongTailSignals, showMesReg5EmaBounceAritySignals, showCampaignTrades, campaignView, activeChart, modalOpen]);
 
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
@@ -1414,6 +1545,27 @@ export default function App() {
                     />
                     Training Annotations ({currentAnnotations.length})
                   </label>
+                  
+                  {/* Indented checklist for individual Marker Sets */}
+                  {showTrainingAnnotations && availableMarkerSets.length > 0 && (
+                    <div style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '2px', borderLeft: '1px dashed var(--border-color)', marginLeft: '7px' }}>
+                      {availableMarkerSets.map(set => {
+                        const count = savedAnnotations.filter(ann => (ann.markerSet || defaultMarkerSetForChart(activeChart)) === set).length;
+                        const isChecked = visibleMarkerSets[set] !== false;
+                        return (
+                          <label key={set} style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: '500', userSelect: 'none' }}>
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              onChange={() => setVisibleMarkerSets(prev => ({ ...prev, [set]: !isChecked }))}
+                              style={{ accentColor: '#22c55e', cursor: 'pointer', width: '13px', height: '13px' }}
+                            />
+                            {set} ({count})
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
                   <label htmlFor="showRawSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
                     <input
                       type="checkbox"
@@ -1444,7 +1596,7 @@ export default function App() {
                     />
                     No-Tail Arity Set 3 ({backtestResults?.signal_set_3_details?.length || 0})
                   </label>
-                  {activeChart === 'MES3' && (
+                  {(activeChart === 'MES3' || activeChart === 'MESM_reg_5') && (
                     <>
                       <label htmlFor="showMes3PreviousTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
                         <input
@@ -1465,6 +1617,50 @@ export default function App() {
                           style={{ accentColor: '#f59e0b', cursor: 'pointer', width: '16px', height: '16px' }}
                         />
                         MES3 8 EMA Trend-Tail ({backtestResults?.mes3_trend_tail_details?.length || 0})
+                      </label>
+                      <label htmlFor="showMes3HaEmaApproachSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                        <input
+                          type="checkbox"
+                          id="showMes3HaEmaApproachSignals"
+                          checked={showMes3HaEmaApproachSignals}
+                          onChange={(e) => setShowMes3HaEmaApproachSignals(e.target.checked)}
+                          style={{ accentColor: '#14b8a6', cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                        HA 10 EMA Reclaim Tail Setup ({backtestResults?.mes3_ha_ema_approach_details?.length || 0})
+                      </label>
+                      {activeChart === 'MESM_reg_5' && (
+                        <>
+                          <label htmlFor="showMesReg5LongTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                            <input
+                              type="checkbox"
+                              id="showMesReg5LongTailSignals"
+                              checked={showMesReg5LongTailSignals}
+                              onChange={(e) => setShowMesReg5LongTailSignals(e.target.checked)}
+                              style={{ accentColor: '#7c3aed', cursor: 'pointer', width: '16px', height: '16px' }}
+                            />
+                            MES Reg5 Long Tail ({backtestResults?.mes_reg5_long_tail_details?.length || 0})
+                          </label>
+                          <label htmlFor="showMesReg5EmaBounceAritySignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
+                            <input
+                              type="checkbox"
+                              id="showMesReg5EmaBounceAritySignals"
+                              checked={showMesReg5EmaBounceAritySignals}
+                              onChange={(e) => setShowMesReg5EmaBounceAritySignals(e.target.checked)}
+                              style={{ accentColor: '#10b981', cursor: 'pointer', width: '16px', height: '16px' }}
+                            />
+                            MES Reg5 EMA Bounce Arity ({backtestResults?.mes_reg5_ema_bounce_arity_details?.length || 0})
+                          </label>
+                        </>
+                      )}
+                      <label htmlFor="showSecondaryPane" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none', marginTop: '4px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '6px' }}>
+                        <input
+                          type="checkbox"
+                          id="showSecondaryPane"
+                          checked={showSecondaryPane}
+                          onChange={(e) => setShowSecondaryPane(e.target.checked)}
+                          style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
+                        />
+                        Show Heiken Ashi Pane
                       </label>
                     </>
                   )}
@@ -1671,8 +1867,8 @@ export default function App() {
                   <span className="status-dot"></span>
                   <span>Local Engine Active</span>
                 </div>
-                <div>Bricks: {chartData.length}</div>
-                {activeChart === 'MES3' && secondaryChartData.length > 0 && (
+                <div>{isRegularCandlestick ? 'Bars' : 'Bricks'}: {chartData.length}</div>
+                {(activeChart === 'MES3' || activeChart === 'MESM_reg_5') && secondaryChartData.length > 0 && (
                   <div>HA 2s Bars: {secondaryChartData.length}</div>
                 )}
                 {currentHaSelection && (
@@ -1680,7 +1876,9 @@ export default function App() {
                     HA Selected: {currentHaSelection.barCount} bars · {currentHaSelection.linkedMesBarCount} MES
                   </div>
                 )}
-                <div style={{ color: 'var(--text-secondary)' }}>Click on any Renko brick body or wick to add/edit annotations.</div>
+                <div style={{ color: 'var(--text-secondary)' }}>
+                  Click on any {isRegularCandlestick ? 'candlestick' : 'Renko brick'} body or wick to add/edit annotations.
+                </div>
               </div>
               <button
                 type="button"
@@ -1691,13 +1889,16 @@ export default function App() {
               </button>
               <ChartComponent
                 data={chartData}
-                secondaryData={activeChart === 'MES3' ? secondaryChartData : []}
+                secondaryData={(activeChart === 'MES3' || activeChart === 'MESM_reg_5') ? secondaryChartData : []}
                 annotations={mergedAnnotations}
                 onBrickClick={handleBrickClick}
                 onHaSelectionChange={handleHaSelectionChange}
                 bookmark={bookmark}
                 onSetBookmark={handleBookmarkBrick}
                 onClearBookmark={handleClearBookmark}
+                isRegularCandlestick={isRegularCandlestick}
+                showSecondaryPane={showSecondaryPane}
+                onToggleSecondaryPane={setShowSecondaryPane}
               />
             </>
           ) : (
@@ -1718,7 +1919,7 @@ export default function App() {
               <div>
                 <h3 className="section-title" style={{ margin: 0 }}>Annotations Log</h3>
                 <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  Total Marked: {currentAnnotations.length}
+                  Total Marked: {filteredManualAnnotations.length}
                 </span>
               </div>
               <button
@@ -1731,9 +1932,9 @@ export default function App() {
             </div>
 
             <div style={{ overflowY: 'auto', flex: 1 }}>
-              {currentAnnotations.length === 0 ? (
+              {filteredManualAnnotations.length === 0 ? (
                 <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
-                  No annotations added to this dataset yet. Click on the chart to start training the algorithm.
+                  No visible annotations. Make sure their marker set is enabled in the sidebar.
                 </div>
               ) : (
                 <table className="annotations-table">
@@ -1751,7 +1952,7 @@ export default function App() {
                     </tr>
                   </thead>
                   <tbody>
-                    {currentAnnotations.map((ann, i) => (
+                    {filteredManualAnnotations.map((ann, i) => (
                       <tr
                         key={i}
                         style={{ cursor: 'pointer' }}
@@ -1908,14 +2109,44 @@ export default function App() {
 
             <div>
               <div style={{ fontSize: '12px', fontWeight: '500', marginBottom: '6px' }}>Marker Set:</div>
-              <select
-                className="marker-set-select"
-                value={selectedMarkerSet || defaultMarkerSetForChart(activeChart)}
-                onChange={e => setSelectedMarkerSet(e.target.value)}
-              >
-                <option value={RAW_RANGE_MARKER_SET}>{RAW_RANGE_MARKER_SET}</option>
-                <option value="Training Set">Training Set</option>
-              </select>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <select
+                  className="marker-set-select"
+                  value={isCreatingNewSet ? '__NEW_SET__' : (selectedMarkerSet || defaultMarkerSetForChart(activeChart))}
+                  onChange={e => {
+                    if (e.target.value === '__NEW_SET__') {
+                      setIsCreatingNewSet(true);
+                      setSelectedMarkerSet('');
+                    } else {
+                      setIsCreatingNewSet(false);
+                      setSelectedMarkerSet(e.target.value);
+                    }
+                  }}
+                  style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '12px' }}
+                >
+                  {availableMarkerSets.map(set => (
+                    <option key={set} value={set}>{set}</option>
+                  ))}
+                  <option value="__NEW_SET__">+ Create new set...</option>
+                </select>
+                {isCreatingNewSet && (
+                  <input
+                    type="text"
+                    placeholder="Enter new set name..."
+                    value={selectedMarkerSet}
+                    onChange={e => setSelectedMarkerSet(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '6px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-primary)',
+                      fontSize: '12px',
+                    }}
+                  />
+                )}
+              </div>
             </div>
 
             <div>

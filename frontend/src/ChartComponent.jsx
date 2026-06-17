@@ -43,6 +43,7 @@ const formatChartData = (data) => {
       originalTime: item.time,
       originalIndex: index,
       time: chartTime,
+      timeMs: chartTime * 1000,
     };
   });
 
@@ -88,7 +89,7 @@ const findNearestBarByMs = (formattedData, targetMs) => {
   let high = formattedData.length - 1;
   while (low <= high) {
     const mid = Math.floor((low + high) / 2);
-    const midMs = parseOriginalTimeMs(formattedData[mid].originalTime);
+    const midMs = formattedData[mid].timeMs;
     if (midMs < targetMs) {
       low = mid + 1;
     } else {
@@ -100,7 +101,7 @@ const findNearestBarByMs = (formattedData, targetMs) => {
     .filter(index => index >= 0 && index < formattedData.length)
     .map(index => formattedData[index]);
   return candidates.reduce((best, candidate) => {
-    const delta = Math.abs(parseOriginalTimeMs(candidate.originalTime) - targetMs);
+    const delta = Math.abs(candidate.timeMs - targetMs);
     if (!best || delta < best.delta) return { bar: candidate, delta };
     return best;
   }, null)?.bar || null;
@@ -232,9 +233,13 @@ class RenkoOverlayRenderer {
         : data.length - 1;
       const barSpacing = chart.timeScale().options().barSpacing;
 
-      // 1. Draw Custom 15-Point Grid Lines
-      const startPrice = Math.floor((minPrice - 150) / brickSize) * brickSize;
-      const endPrice = Math.ceil((maxPrice + 150) / brickSize) * brickSize;
+      // 1. Draw Custom 15-Point Grid Lines (optimized to visible range)
+      const priceScaleRange = chart.priceScale('right').getVisibleRange();
+      const visibleMinPrice = priceScaleRange && Number.isFinite(priceScaleRange.from) ? priceScaleRange.from : minPrice;
+      const visibleMaxPrice = priceScaleRange && Number.isFinite(priceScaleRange.to) ? priceScaleRange.to : maxPrice;
+
+      const startPrice = Math.floor((visibleMinPrice - brickSize) / brickSize) * brickSize;
+      const endPrice = Math.ceil((visibleMaxPrice + brickSize) / brickSize) * brickSize;
 
       ctx.lineWidth = (options.gridLineWidth || 1) * verticalPixelRatio;
       ctx.strokeStyle = options.gridColor || 'rgba(0, 0, 0, 0.16)'; // Faint black lines for gray background
@@ -527,6 +532,9 @@ export default function ChartComponent({
   bookmark,
   onSetBookmark,
   onClearBookmark,
+  isRegularCandlestick = false,
+  showSecondaryPane = true,
+  onToggleSecondaryPane,
 }) {
   const chartContainerRef = useRef(null);
   const panesContainerRef = useRef(null);
@@ -558,9 +566,9 @@ export default function ChartComponent({
   const [secondaryPanePercent, setSecondaryPanePercent] = useState(30);
   const [haSelectionMode, setHaSelectionMode] = useState(false);
   const [haSelection, setHaSelection] = useState(null);
-  const [haSelectionOverlay, setHaSelectionOverlay] = useState(null);
+  const haSelectionHighlightRef = useRef(null);
 
-  const hasSecondaryPane = secondaryData && secondaryData.length > 0;
+  const hasSecondaryPane = secondaryData && secondaryData.length > 0 && showSecondaryPane;
   hasSecondaryPaneRef.current = hasSecondaryPane;
   haSelectionModeRef.current = haSelectionMode;
 
@@ -780,7 +788,7 @@ export default function ChartComponent({
       : candlestickSeriesRef.current;
     if (!targetData?.length || !targetChart || !targetSeries) return;
 
-    const targetBar = findNearestBarByMs(targetData, parseOriginalTimeMs(sourceBar.originalTime));
+    const targetBar = findNearestBarByMs(targetData, sourceBar.timeMs);
     if (!targetBar) return;
 
     const targetPrice = Number.isFinite(sourcePrice) ? sourcePrice : targetBar.close;
@@ -792,7 +800,7 @@ export default function ChartComponent({
   };
 
   const clearSyncedCrosshair = (source) => {
-    if (isSyncingCrosshairRef.current) return;
+    if (isSyncingCrosshairRef.current || !hasSecondaryPaneRef.current) return;
     const targetChart = source === 'primary' ? secondaryChartRef.current : chartRef.current;
     targetChart?.clearCrosshairPosition();
   };
@@ -884,28 +892,30 @@ export default function ChartComponent({
 
   const updateHaSelectionOverlay = (selection = haSelectionRef.current) => {
     const chart = secondaryChartRef.current;
+    const el = haSelectionHighlightRef.current;
+    if (!el) return;
+
     if (!chart || !selection) {
-      setHaSelectionOverlay(null);
+      el.style.display = 'none';
       return;
     }
 
     const startX = chart.timeScale().timeToCoordinate(selection.startChartTime);
     const endX = chart.timeScale().timeToCoordinate(selection.endChartTime);
     if (startX === null || endX === null) {
-      setHaSelectionOverlay(null);
+      el.style.display = 'none';
       return;
     }
 
-    setHaSelectionOverlay({
-      left: Math.min(startX, endX),
-      width: Math.max(3, Math.abs(endX - startX)),
-    });
+    el.style.display = 'block';
+    el.style.left = `${Math.min(startX, endX)}px`;
+    el.style.width = `${Math.max(3, Math.abs(endX - startX))}px`;
   };
 
   const clearHaSelection = () => {
     haSelectionRef.current = null;
     setHaSelection(null);
-    setHaSelectionOverlay(null);
+    updateHaSelectionOverlay(null);
     onHaSelectionChange?.(null);
   };
 
@@ -1035,7 +1045,7 @@ export default function ChartComponent({
       if (source === 'primary') {
         centerSecondaryPaneOnTime(sourceBar.originalTime);
       } else {
-        centerPrimaryPaneOnTime(sourceBar.originalTime);
+        // Do not automatically recenter the primary chart when interacting with the secondary chart
       }
       syncCrosshairFromBar(source, sourceBar);
     }, 450);
@@ -1192,14 +1202,25 @@ export default function ChartComponent({
       };
     };
 
-    // Add Candlestick Series (for Renko Bricks + Wicks)
-    const candlestickSeries = chart.addSeries(CandlestickSeries, {
+    // Add Candlestick Series (for Renko Bricks + Wicks, or standard wicks/borders if regular)
+    const candlestickSeriesOptions = isRegularCandlestick ? {
+      upColor: '#004cff',
+      downColor: '#cc1a1a',
+      borderVisible: true,
+      borderColor: '#000000',
+      borderUpColor: '#000000',
+      borderDownColor: '#000000',
+      wickVisible: true,
+      wickUpColor: '#000000',
+      wickDownColor: '#000000',
+    } : {
       upColor: 'rgba(0, 0, 0, 0)',
       downColor: 'rgba(0, 0, 0, 0)',
       borderVisible: false,
       wickVisible: false,      // Hide default 1px wicks (our custom primitive draws thick wicks)
       autoscaleInfoProvider: constantPriceSpan,
-    });
+    };
+    const candlestickSeries = chart.addSeries(CandlestickSeries, candlestickSeriesOptions);
     candlestickSeriesRef.current = candlestickSeries;
 
     // Add Line Series (5 EMA yellow, 10 EMA green to match MultiCharts)
@@ -1231,19 +1252,21 @@ export default function ChartComponent({
 
     const sessionOpenTimes = getSessionOpenIndices(data).map(index => formattedData[index].time);
 
-    // Attach custom bold wicks and 15pt grid overlay primitive
-    const renkoOverlay = new RenkoOverlayPrimitive(formattedData, {
-      wickWidth: 3, // 3 pixels wide
-      wickColor: '#000000',
-      bodyBorderWidth: 1,
-      bodyBorderColor: '#000000',
-      upColor: '#004cff',
-      downColor: '#cc1a1a',
-      brickSize: inferredBrickSize,
-      gridColor: 'rgba(0, 0, 0, 0.18)',
-    });
-    candlestickSeries.attachPrimitive(renkoOverlay);
-    renkoOverlayRef.current = renkoOverlay;
+    // Attach custom bold wicks and 15pt grid overlay primitive (only for Renko charts)
+    if (!isRegularCandlestick) {
+      const renkoOverlay = new RenkoOverlayPrimitive(formattedData, {
+        wickWidth: 3, // 3 pixels wide
+        wickColor: '#000000',
+        bodyBorderWidth: 1,
+        bodyBorderColor: '#000000',
+        upColor: '#004cff',
+        downColor: '#cc1a1a',
+        brickSize: inferredBrickSize,
+        gridColor: 'rgba(0, 0, 0, 0.18)',
+      });
+      candlestickSeries.attachPrimitive(renkoOverlay);
+      renkoOverlayRef.current = renkoOverlay;
+    }
     candlestickSeries.attachPrimitive(new SessionDividerPrimitive(sessionOpenTimes, {
       color: '#363636',
       lineWidth: 2,
@@ -1390,7 +1413,7 @@ export default function ChartComponent({
   }, [data]);
 
   useEffect(() => {
-    if (!secondaryChartContainerRef.current || !secondaryData || secondaryData.length === 0) {
+    if (!secondaryChartContainerRef.current || !secondaryData || secondaryData.length === 0 || !hasSecondaryPane) {
       secondaryFormattedDataRef.current = [];
       return;
     }
@@ -1560,7 +1583,7 @@ export default function ChartComponent({
       secondaryFormattedDataRef.current = [];
       secondaryBarByChartTimeRef.current = new Map();
     };
-  }, [secondaryData]);
+  }, [secondaryData, hasSecondaryPane]);
 
   useEffect(() => {
     const virtualBricks = (annotations || [])
@@ -1698,6 +1721,25 @@ export default function ChartComponent({
               shape: 'square',
               text: '',
             });
+          } else if (ann.isMesReg5RecoveryCampaignEntry) {
+            markers.push({
+              time: chartTime,
+              position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
+              color: '#000000',
+              shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
+              size: 3,
+              text: '',
+            });
+          } else if (ann.isMesReg5RecoveryCampaignExit) {
+            const profit = Number(ann.profitBricks);
+            markers.push({
+              time: chartTime,
+              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar',
+              color: Number.isFinite(profit) && profit >= 0 ? '#f59e0b' : '#f43f5e',
+              shape: 'square',
+              size: 3,
+              text: Number.isFinite(profit) && profit >= 0 ? 'DONE' : 'EXIT',
+            });
           } else if (ann.isCampaignEntry) {
             markers.push({
               time: chartTime,
@@ -1763,11 +1805,41 @@ export default function ChartComponent({
               text: '',
             });
           } else if (ann.action === 'Buy') {
+            if (ann.signalSet === 6) {
+              markers.push({
+                time: chartTime,
+                position: 'belowBar',
+                color: '#0f766e',
+                shape: 'arrowUp',
+                text: '',
+              });
+              return;
+            }
             if (ann.signalSet === 5) {
               markers.push({
                 time: chartTime,
                 position: 'belowBar',
                 color: '#f59e0b',
+                shape: 'arrowUp',
+                text: '',
+              });
+              return;
+            }
+            if (ann.signalSet === 7) {
+              markers.push({
+                time: chartTime,
+                position: 'belowBar',
+                color: '#7c3aed',
+                shape: 'arrowUp',
+                text: '',
+              });
+              return;
+            }
+            if (ann.signalSet === 8) {
+              markers.push({
+                time: chartTime,
+                position: 'belowBar',
+                color: '#10b981',
                 shape: 'arrowUp',
                 text: '',
               });
@@ -1793,11 +1865,41 @@ export default function ChartComponent({
               text: '', // No text for generated signal or built-in TEACH marker
             });
           } else if (ann.action === 'Sell') {
+            if (ann.signalSet === 6) {
+              markers.push({
+                time: chartTime,
+                position: 'aboveBar',
+                color: '#0f766e',
+                shape: 'arrowDown',
+                text: '',
+              });
+              return;
+            }
             if (ann.signalSet === 5) {
               markers.push({
                 time: chartTime,
                 position: 'aboveBar',
                 color: '#f59e0b',
+                shape: 'arrowDown',
+                text: '',
+              });
+              return;
+            }
+            if (ann.signalSet === 7) {
+              markers.push({
+                time: chartTime,
+                position: 'aboveBar',
+                color: '#7c3aed',
+                shape: 'arrowDown',
+                text: '',
+              });
+              return;
+            }
+            if (ann.signalSet === 8) {
+              markers.push({
+                time: chartTime,
+                position: 'aboveBar',
+                color: '#10b981',
                 shape: 'arrowDown',
                 text: '',
               });
@@ -1837,10 +1939,17 @@ export default function ChartComponent({
 
     markers.sort((a, b) => a.time - b.time);
 
+    const finalMarkers = markers.map(m => {
+      if (m.shape === 'arrowUp' || m.shape === 'arrowDown') {
+        return { ...m, color: '#000000' };
+      }
+      return m;
+    });
+
     if (!markersPluginRef.current) {
-      markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, markers);
+      markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, finalMarkers);
     } else {
-      markersPluginRef.current.setMarkers(markers);
+      markersPluginRef.current.setMarkers(finalMarkers);
     }
   }, [annotations, data]);
 
@@ -1873,16 +1982,12 @@ export default function ChartComponent({
               }}
             >
               <div ref={secondaryChartContainerRef} style={{ width: '100%', height: '100%' }} />
-              {haSelectionOverlay && (
-                <div
-                  className="ha-selection-highlight"
-                  style={{
-                    left: `${haSelectionOverlay.left}px`,
-                    width: `${haSelectionOverlay.width}px`,
-                  }}
-                />
-              )}
-              <div className="ha-pane-toolbar">
+              <div
+                ref={haSelectionHighlightRef}
+                className="ha-selection-highlight"
+                style={{ display: 'none' }}
+              />
+              <div className="ha-pane-toolbar" style={{ display: 'flex', width: 'calc(100% - 24px)', alignItems: 'center' }}>
                 <span>MES 2s Heiken Ashi · MA1 10 EMA · MA2 60 SMA</span>
                 {haSelection && (
                   <span className="ha-selection-summary">
@@ -1907,6 +2012,28 @@ export default function ChartComponent({
                     Clear
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="ha-selection-button"
+                  title="Close Heiken Ashi Pane"
+                  style={{
+                    marginLeft: 'auto',
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                    fontWeight: '700',
+                    color: '#ff1744',
+                    padding: '2px 6px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onMouseDown={event => event.stopPropagation()}
+                  onClick={() => onToggleSecondaryPane?.(false)}
+                >
+                  ✕
+                </button>
               </div>
             </div>
           </>

@@ -68,6 +68,43 @@ DEFAULT_CONFIG = {
     "set3_min_ema_gap_bricks": 0.5,
     "set3_synthetic_min_ema_gap_bricks": -0.25,
     "set3_min_prior_brick_seconds": 3,
+    "mes3_ha_ema_approach_slope_period": 8,
+    "mes3_ha_ema_approach_slope_threshold": 1.25,
+    "mes3_ha_ema_approach_ticks": 4,
+    "mes3_ha_ema_approach_min_tail": 0.25,
+    "mes3_ha_indecision_min_bars": 2,
+    "mes3_ha_indecision_body_ratio": 0.45,
+    "mes3_ha_breakout_body_ratio": 0.45,
+    "mes3_ha_ema_approach_pre_seconds": 20,
+    "mes3_ha_ema_approach_post_seconds": 12,
+    "mes3_ha_ema_approach_cooldown_bars": 1,
+    "mes3_ha_ema_approach_pullback_ticks": 0,
+    "mes_reg5_long_tail_slope_period": 8,
+    "mes_reg5_long_tail_slope_threshold": 0.20,
+    "mes_reg5_long_tail_min_tail": 0.75,
+    "mes_reg5_long_tail_min_close_distance": 1.0,
+    "mes_reg5_long_tail_cooldown_bars": 3,
+    "mes_reg5_ema_bounce_arity_slope_period": 8,
+    "mes_reg5_ema_bounce_arity_slope_threshold": 0.15,
+    "mes_reg5_ema_bounce_arity_short_slope_period": 4,
+    "mes_reg5_ema_bounce_arity_short_slope_threshold": 0.28,
+    "mes_reg5_ema_bounce_arity_relaxed_short_slope_threshold": 0.18,
+    "mes_reg5_ema_bounce_arity_strong_short_slope_threshold": 0.30,
+    "mes_reg5_ema_bounce_arity_strong_slope_threshold": 0.22,
+    "mes_reg5_ema_bounce_arity_extended_short_slope_threshold": 0.36,
+    "mes_reg5_ema_bounce_arity_lookback": 8,
+    "mes_reg5_ema_bounce_arity_base_max_reversals": 3,
+    "mes_reg5_ema_bounce_arity_strong_max_reversals": 5,
+    "mes_reg5_ema_bounce_arity_base_max_overlap": 0.68,
+    "mes_reg5_ema_bounce_arity_strong_max_overlap": 0.86,
+    "mes_reg5_ema_bounce_arity_buy_low_to_ema_max": 0.25,
+    "mes_reg5_ema_bounce_arity_sell_high_to_ema_min": -0.50,
+    "mes_reg5_ema_bounce_arity_extended_buy_low_to_ema_max": 0.65,
+    "mes_reg5_ema_bounce_arity_extended_sell_high_to_ema_min": -0.75,
+    "mes_reg5_ema_bounce_arity_extended_min_tail": 0.75,
+    "mes_reg5_ema_bounce_arity_min_close_dist_buy": 0.40,
+    "mes_reg5_ema_bounce_arity_min_close_dist_sell": 0.75,
+    "mes_reg5_ema_bounce_arity_cooldown_bars": 2,
 }
 
 def load_json_data(file_path):
@@ -619,6 +656,480 @@ def run_mes3_previous_tail_rejection_strategy(data, config):
         last_signal_index = i
 
     return signal_details, evaluate_signal_details(data, signal_details, config)
+
+def run_mes_reg5_long_tail_strategy(data, config):
+    signal_details = []
+    slope_period = max(1, config.get("mes_reg5_long_tail_slope_period", 8))
+    slope_threshold = config.get("mes_reg5_long_tail_slope_threshold", 0.20)
+    min_tail = config.get("mes_reg5_long_tail_min_tail", 0.75)
+    min_close_distance = config.get("mes_reg5_long_tail_min_close_distance", 1.0)
+    cooldown_bars = max(0, config.get("mes_reg5_long_tail_cooldown_bars", 3))
+    last_signal_index = -999999
+
+    for i in range(slope_period, len(data)):
+        if i - last_signal_index <= cooldown_bars:
+            continue
+
+        current = data[i]
+        ema = current.get("ema")
+        prev_ema = data[i - slope_period].get("ema")
+        if None in (ema, prev_ema):
+            continue
+
+        o, h, l, c = current["open"], current["high"], current["low"], current["close"]
+        is_up = c > o
+        is_down = c < o
+        lower_tail = min(o, c) - l
+        upper_tail = h - max(o, c)
+        ema_slope = (ema - prev_ema) / slope_period
+        close_to_ema = c - ema
+
+        action = None
+        if (
+            is_up and
+            lower_tail >= min_tail and
+            upper_tail == 0.0 and
+            ema_slope >= slope_threshold and
+            close_to_ema >= min_close_distance
+        ):
+            action = "Buy"
+        elif (
+            is_down and
+            upper_tail >= min_tail and
+            lower_tail == 0.0 and
+            ema_slope <= -slope_threshold and
+            -close_to_ema >= min_close_distance
+        ):
+            action = "Sell"
+
+        if not action:
+            continue
+
+        signal_details.append({
+            "barIndex": i,
+            "timestamp": current["time"],
+            "action": action,
+            "metrics": {
+                "setupType": "mesReg5LongTail",
+                "ema": ema,
+                "emaSlope": ema_slope,
+                "upperTail": upper_tail,
+                "lowerTail": lower_tail,
+                "closeToEma": close_to_ema,
+            },
+        })
+        last_signal_index = i
+
+    return signal_details, evaluate_signal_details(data, signal_details, config)
+
+def run_mes_reg5_ema_bounce_arity_strategy(data, config):
+    signal_details = []
+    slope_period = max(1, config.get("mes_reg5_ema_bounce_arity_slope_period", 8))
+    short_slope_period = max(1, config.get("mes_reg5_ema_bounce_arity_short_slope_period", 4))
+    slope_threshold = config.get("mes_reg5_ema_bounce_arity_slope_threshold", 0.20)
+    short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_short_slope_threshold", 0.28)
+    relaxed_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_relaxed_short_slope_threshold", 0.18)
+    strong_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_strong_short_slope_threshold", 0.30)
+    strong_slope_threshold = config.get("mes_reg5_ema_bounce_arity_strong_slope_threshold", 0.22)
+    extended_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_extended_short_slope_threshold", 0.36)
+    lookback = max(2, config.get("mes_reg5_ema_bounce_arity_lookback", 8))
+    base_max_reversals = config.get("mes_reg5_ema_bounce_arity_base_max_reversals", 4)
+    strong_max_reversals = config.get("mes_reg5_ema_bounce_arity_strong_max_reversals", base_max_reversals + 1)
+    base_max_overlap = config.get("mes_reg5_ema_bounce_arity_base_max_overlap", 0.72)
+    strong_max_overlap = config.get("mes_reg5_ema_bounce_arity_strong_max_overlap", 0.88)
+    buy_low_to_ema_max = config.get("mes_reg5_ema_bounce_arity_buy_low_to_ema_max", 0.65)
+    sell_high_to_ema_min = config.get("mes_reg5_ema_bounce_arity_sell_high_to_ema_min", -1.10)
+    extended_buy_low_to_ema_max = config.get("mes_reg5_ema_bounce_arity_extended_buy_low_to_ema_max", buy_low_to_ema_max)
+    extended_sell_high_to_ema_min = config.get("mes_reg5_ema_bounce_arity_extended_sell_high_to_ema_min", sell_high_to_ema_min)
+    extended_min_tail = config.get("mes_reg5_ema_bounce_arity_extended_min_tail", 0.75)
+    min_close_dist_buy = config.get("mes_reg5_ema_bounce_arity_min_close_dist_buy", 0.50)
+    min_close_dist_sell = config.get("mes_reg5_ema_bounce_arity_min_close_dist_sell", 1.00)
+    cooldown_bars = max(0, config.get("mes_reg5_ema_bounce_arity_cooldown_bars", 3))
+    last_signal_index = -999999
+
+    start_index = max(slope_period, short_slope_period, lookback - 1)
+
+    for i in range(start_index, len(data)):
+        if i - last_signal_index <= cooldown_bars:
+            continue
+
+        current = data[i]
+        ema = current.get("ema")
+        prev_ema = data[i - slope_period].get("ema")
+        prev_short_ema = data[i - short_slope_period].get("ema")
+        if None in (ema, prev_ema, prev_short_ema):
+            continue
+
+        o, h, l, c = current["open"], current["high"], current["low"], current["close"]
+        is_up = c > o
+        is_down = c < o
+        ema_slope = (ema - prev_ema) / slope_period
+        short_ema_slope = (ema - prev_short_ema) / short_slope_period
+        upper_tail = h - max(o, c)
+        lower_tail = min(o, c) - l
+        low_to_ema = l - ema
+        high_to_ema = h - ema
+        close_to_ema = c - ema
+
+        # Arity metrics
+        avg_overlap, reversals = calculate_arity_metrics(data, i, lookback)
+
+        is_strong_trend = (
+            abs(short_ema_slope) >= strong_short_slope_threshold and
+            abs(ema_slope) >= strong_slope_threshold
+        )
+        max_reversals = strong_max_reversals if is_strong_trend else base_max_reversals
+        max_overlap = strong_max_overlap if is_strong_trend else base_max_overlap
+
+        if reversals > max_reversals or avg_overlap > max_overlap:
+            continue
+
+        action = None
+        buy_slope_ok = (
+            short_ema_slope >= short_slope_threshold or
+            (short_ema_slope >= relaxed_short_slope_threshold and ema_slope >= slope_threshold)
+        )
+        sell_slope_ok = (
+            short_ema_slope <= -short_slope_threshold or
+            (short_ema_slope <= -relaxed_short_slope_threshold and ema_slope <= -slope_threshold)
+        )
+        buy_near_ema = low_to_ema <= buy_low_to_ema_max
+        sell_near_ema = high_to_ema >= sell_high_to_ema_min
+        buy_extended_tail = (
+            lower_tail >= extended_min_tail and
+            low_to_ema <= extended_buy_low_to_ema_max and
+            short_ema_slope >= extended_short_slope_threshold
+        )
+        sell_extended_tail = (
+            upper_tail >= extended_min_tail and
+            high_to_ema >= extended_sell_high_to_ema_min and
+            short_ema_slope <= -extended_short_slope_threshold
+        )
+
+        if (
+            is_up and
+            buy_slope_ok and
+            close_to_ema >= min_close_dist_buy and
+            (buy_near_ema or buy_extended_tail)
+        ):
+            action = "Buy"
+        elif (
+            is_down and
+            sell_slope_ok and
+            -close_to_ema >= min_close_dist_sell and
+            (sell_near_ema or sell_extended_tail)
+        ):
+            action = "Sell"
+
+        if not action:
+            continue
+
+        signal_details.append({
+            "barIndex": i,
+            "timestamp": current["time"],
+            "action": action,
+            "metrics": {
+                "setupType": "mesReg5EmaBounceArity",
+                "ema": ema,
+                "emaSlope": ema_slope,
+                "shortEmaSlope": short_ema_slope,
+                "averageOverlap": avg_overlap,
+                "reversals": reversals,
+                "isStrongTrend": is_strong_trend,
+                "lowToEma": low_to_ema,
+                "highToEma": high_to_ema,
+                "closeToEma": close_to_ema,
+                "upperTail": upper_tail,
+                "lowerTail": lower_tail,
+                "usedExtendedTail": buy_extended_tail if action == "Buy" else sell_extended_tail,
+            },
+        })
+        last_signal_index = i
+
+    return signal_details, evaluate_signal_details(data, signal_details, config)
+
+
+def parse_timestamp_seconds(value):
+    if not value:
+        return None
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        return None
+
+def bar_color(bar):
+    if bar["close"] > bar["open"]:
+        return "up"
+    if bar["close"] < bar["open"]:
+        return "down"
+    return "flat"
+
+def is_ha_indecision(bar, body_ratio_threshold):
+    bar_range = max(0.0000001, bar["high"] - bar["low"])
+    body = abs(bar["close"] - bar["open"])
+    return body / bar_range <= body_ratio_threshold
+
+def is_ha_continuation_breakout(direction, bar, cluster_low, cluster_high, min_body_ratio):
+    bar_range = max(0.0000001, bar["high"] - bar["low"])
+    body_ratio = abs(bar["close"] - bar["open"]) / bar_range
+    ma1 = bar.get("ma1")
+
+    if direction == "Buy":
+        return (
+            bar_color(bar) == "up" and
+            body_ratio >= min_body_ratio and
+            bar["close"] > cluster_high and
+            (ma1 is None or bar["close"] > ma1)
+        )
+
+    return (
+        bar_color(bar) == "down" and
+        body_ratio >= min_body_ratio and
+        bar["close"] < cluster_low and
+        (ma1 is None or bar["close"] < ma1)
+    )
+
+def find_latest_ha_indecision_cluster(ha_window, direction, min_length, body_ratio_threshold, require_pullback_side=True):
+    best = None
+    index = 0
+    while index < len(ha_window):
+        if not is_ha_indecision(ha_window[index], body_ratio_threshold):
+            index += 1
+            continue
+
+        end = index
+        while end < len(ha_window) and is_ha_indecision(ha_window[end], body_ratio_threshold):
+            end += 1
+
+        if end - index >= min_length:
+            cluster = ha_window[max(index, end - 6):end]
+            cluster_low = min(bar["low"] for bar in cluster)
+            cluster_high = max(bar["high"] for bar in cluster)
+            if require_pullback_side:
+                window_low = min(bar["low"] for bar in ha_window)
+                window_high = max(bar["high"] for bar in ha_window)
+                midpoint = (window_low + window_high) / 2
+                cluster_midpoint = (cluster_low + cluster_high) / 2
+                if direction == "Buy" and cluster_midpoint > midpoint:
+                    index = end + 1
+                    continue
+                if direction == "Sell" and cluster_midpoint < midpoint:
+                    index = end + 1
+                    continue
+            best = {
+                "startOffset": max(index, end - 6),
+                "endOffset": end - 1,
+                "barCount": len(cluster),
+                "low": cluster_low,
+                "high": cluster_high,
+                "startTime": cluster[0]["time"],
+                "endTime": cluster[-1]["time"],
+            }
+
+        index = end + 1
+
+    return best
+
+def cluster_crosses_ha_10_ema(direction, cluster_bars, min_diff=0.0):
+    if not cluster_bars:
+        return False
+    if direction == "Buy":
+        return any(bar.get("ma1") is not None and (bar["ma1"] - bar["close"]) >= min_diff for bar in cluster_bars)
+    return any(bar.get("ma1") is not None and (bar["close"] - bar["ma1"]) >= min_diff for bar in cluster_bars)
+
+def find_latest_ha_10_ema_indecision_cluster(ha_window, direction, min_length, body_ratio_threshold, min_diff=0.0):
+    best = None
+    index = 0
+    while index < len(ha_window):
+        if not is_ha_indecision(ha_window[index], body_ratio_threshold):
+            index += 1
+            continue
+
+        end = index
+        while end < len(ha_window) and is_ha_indecision(ha_window[end], body_ratio_threshold):
+            end += 1
+
+        if end - index >= min_length:
+            cluster = ha_window[max(index, end - 6):end]
+            if cluster_crosses_ha_10_ema(direction, cluster, min_diff=min_diff):
+                best = {
+                    "startOffset": max(index, end - 6),
+                    "endOffset": end - 1,
+                    "barCount": len(cluster),
+                    "low": min(bar["low"] for bar in cluster),
+                    "high": max(bar["high"] for bar in cluster),
+                    "startTime": cluster[0]["time"],
+                    "endTime": cluster[-1]["time"],
+                    "minMa1Distance": min(
+                        (bar["close"] - bar["ma1"])
+                        for bar in cluster
+                        if bar.get("ma1") is not None
+                    ),
+                    "maxMa1Distance": max(
+                        (bar["close"] - bar["ma1"])
+                        for bar in cluster
+                        if bar.get("ma1") is not None
+                    ),
+                }
+
+        index = end + 1
+
+    return best
+
+def is_ha_10_ema_reclaim_breakout(direction, bar, cluster_low, cluster_high, min_body_ratio):
+    ma1 = bar.get("ma1")
+    if ma1 is None:
+        return False
+
+    bar_range = max(0.0000001, bar["high"] - bar["low"])
+    body_ratio = abs(bar["close"] - bar["open"]) / bar_range
+    if body_ratio < min_body_ratio:
+        return False
+
+    if direction == "Buy":
+        return (
+            bar_color(bar) == "up" and
+            bar["close"] > ma1 and
+            bar["close"] > cluster_high
+        )
+
+    return (
+        bar_color(bar) == "down" and
+        bar["close"] < ma1 and
+        bar["close"] < cluster_low
+    )
+
+def run_mes3_ha_ema_approach_strategy(data, ha_data, config):
+    if not ha_data:
+        return []
+
+    ha_times = [parse_timestamp_seconds(bar.get("time")) for bar in ha_data]
+    signal_details = []
+    tick_size = infer_price_increment(data)
+    ema_slope_period = max(1, config.get("mes3_ha_ema_approach_slope_period", 8))
+    ema_slope_threshold = config.get("mes3_ha_ema_approach_slope_threshold", 1.25)
+    approach_ticks = config.get("mes3_ha_ema_approach_ticks", 4)
+    approach_distance = tick_size * approach_ticks
+    min_tail = config.get("mes3_ha_ema_approach_min_tail", tick_size)
+    ha_cluster_min_bars = max(2, config.get("mes3_ha_indecision_min_bars", 2))
+    ha_indecision_body_ratio = config.get("mes3_ha_indecision_body_ratio", 0.45)
+    ha_breakout_body_ratio = config.get("mes3_ha_breakout_body_ratio", 0.45)
+    ha_pre_seconds = config.get("mes3_ha_ema_approach_pre_seconds", 20)
+    ha_post_seconds = config.get("mes3_ha_ema_approach_post_seconds", 12)
+    cooldown_bars = max(0, config.get("mes3_ha_ema_approach_cooldown_bars", 1))
+    ha_pullback_ticks = config.get("mes3_ha_ema_approach_pullback_ticks", 0)
+    min_ha_diff = tick_size * ha_pullback_ticks
+    last_signal_index = -999999
+
+    for i in range(max(ema_slope_period, 1), len(data)):
+        if i - last_signal_index <= cooldown_bars:
+            continue
+
+        current = data[i]
+        previous = data[i - 1]
+        ema = current.get("ema")
+        previous_ema = data[i - ema_slope_period].get("ema")
+        if ema is None or previous_ema is None:
+            continue
+
+        ema_slope = ema - previous_ema
+        upper_tail = current["high"] - max(current["open"], current["close"])
+        lower_tail = min(current["open"], current["close"]) - current["low"]
+        action = None
+        tail_distance_to_ema = None
+
+        if (
+            ema_slope >= ema_slope_threshold and
+            current["close"] > ema and
+            lower_tail >= min_tail and
+            abs(current["low"] - ema) <= approach_distance
+        ):
+            action = "Buy"
+            tail_distance_to_ema = current["low"] - ema
+        elif (
+            ema_slope <= -ema_slope_threshold and
+            current["close"] < ema and
+            upper_tail >= min_tail and
+            abs(current["high"] - ema) <= approach_distance
+        ):
+            action = "Sell"
+            tail_distance_to_ema = current["high"] - ema
+
+        if not action:
+            continue
+
+        start_seconds = parse_timestamp_seconds(previous.get("time"))
+        end_seconds = parse_timestamp_seconds(current.get("time"))
+        if start_seconds is None or end_seconds is None:
+            continue
+        search_start_seconds = max(start_seconds - ha_pre_seconds, end_seconds - ha_pre_seconds)
+        search_end_seconds = end_seconds + ha_post_seconds
+
+        import bisect
+        ha_start = bisect.bisect_left(ha_times, search_start_seconds)
+        ha_end = bisect.bisect_right(ha_times, search_end_seconds)
+        ha_window = ha_data[ha_start:ha_end]
+        if len(ha_window) < ha_cluster_min_bars + 1:
+            continue
+
+        cluster = find_latest_ha_10_ema_indecision_cluster(
+            ha_window,
+            action,
+            ha_cluster_min_bars,
+            ha_indecision_body_ratio,
+            min_diff=min_ha_diff
+        )
+        if not cluster:
+            continue
+
+        breakout = None
+        breakout_start = ha_start + cluster["endOffset"] + 1
+        for ha_index in range(breakout_start, ha_end):
+            candidate = ha_data[ha_index]
+            if is_ha_10_ema_reclaim_breakout(
+                action,
+                candidate,
+                cluster["low"],
+                cluster["high"],
+                ha_breakout_body_ratio,
+            ):
+                breakout = candidate
+                break
+
+        if not breakout:
+            continue
+
+        signal_details.append({
+            "barIndex": i,
+            "timestamp": current["time"],
+            "action": action,
+            "metrics": {
+                "setupType": "mes3HaEmaApproachIndecisionBreakout",
+                "ema": ema,
+                "emaSlope": ema_slope,
+                "tailDistanceToEma": tail_distance_to_ema,
+                "approachDistance": approach_distance,
+                "upperTail": upper_tail,
+                "lowerTail": lower_tail,
+                "haClusterStartTime": cluster["startTime"],
+                "haClusterEndTime": cluster["endTime"],
+                "haClusterBars": cluster["barCount"],
+                "haClusterLow": cluster["low"],
+                "haClusterHigh": cluster["high"],
+                "haClusterMinMa1Distance": cluster.get("minMa1Distance"),
+                "haClusterMaxMa1Distance": cluster.get("maxMa1Distance"),
+                "haBreakoutTime": breakout["time"],
+                "haBreakoutOpen": breakout["open"],
+                "haBreakoutHigh": breakout["high"],
+                "haBreakoutLow": breakout["low"],
+                "haBreakoutClose": breakout["close"],
+                "haBreakoutMa1": breakout.get("ma1"),
+            },
+        })
+        last_signal_index = i
+
+    return signal_details
 
 def build_yellow_momentum_feature_cache(data, slope_periods, arity_lookbacks, arity_cache):
     feature_cache = {}
@@ -1928,6 +2439,159 @@ def run_ema_bounce_campaign(data, signal_details, config):
     }
     return result
 
+def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
+    campaign_name = "MES Reg5 Daily Recovery"
+    start_time = "06:30:00"
+    end_time = "14:00:00"
+    tick_size = infer_price_increment(data)
+    range_size = tick_size * 5
+    target_points = range_size
+    first_stop_points = tick_size * 10
+
+    def bar_direction(bar):
+        if bar["close"] > bar["open"]:
+            return "Buy"
+        if bar["close"] < bar["open"]:
+            return "Sell"
+        return "Flat"
+
+    def in_session(timestamp):
+        time = timestamp.split("T")[1].replace("Z", "")
+        return start_time <= time <= end_time
+
+    date_to_bar_indices = {}
+    for index, bar in enumerate(data):
+        date = bar["time"].split("T")[0]
+        date_to_bar_indices.setdefault(date, []).append(index)
+
+    date_to_signals = {}
+    for signal in signal_details:
+        date = signal["timestamp"].split("T")[0]
+        if in_session(signal["timestamp"]):
+            date_to_signals.setdefault(date, []).append(signal)
+
+    daily_reports = []
+    for date in sorted(date_to_signals):
+        day_signals = sorted(date_to_signals[date], key=lambda signal: signal["barIndex"])
+        daily_profit_points = 0.0
+        trades = []
+
+        for signal in day_signals:
+            if daily_profit_points >= target_points:
+                break
+
+            entry_index = signal["barIndex"]
+            entry_bar = data[entry_index]
+            if not in_session(entry_bar["time"]):
+                continue
+
+            direction = signal["action"]
+            direction_multiplier = 1 if direction == "Buy" else -1
+            entry_price = entry_bar["close"]
+            first_trade = len(trades) == 0
+            remaining_target_points = target_points - daily_profit_points
+            exit_index = None
+            exit_price = None
+            profit_points = None
+            result = None
+
+            for index in range(entry_index + 1, len(data)):
+                bar = data[index]
+                if bar["time"].split("T")[0] != date or not in_session(bar["time"]):
+                    exit_index = max(entry_index, index - 1)
+                    exit_bar = data[exit_index]
+                    exit_price = exit_bar["close"]
+                    profit_points = (exit_price - entry_price) * direction_multiplier
+                    result = "EndSession"
+                    break
+
+                favorable_points = (
+                    bar["high"] - entry_price
+                    if direction == "Buy"
+                    else entry_price - bar["low"]
+                )
+                adverse_points = (
+                    entry_price - bar["low"]
+                    if direction == "Buy"
+                    else bar["high"] - entry_price
+                )
+
+                if first_trade:
+                    hit_target = favorable_points >= target_points
+                    hit_stop = adverse_points >= first_stop_points
+                    if hit_stop:
+                        exit_index = index
+                        exit_price = entry_price - direction_multiplier * first_stop_points
+                        profit_points = -first_stop_points
+                        result = "FirstStop"
+                        break
+                    if hit_target:
+                        exit_index = index
+                        exit_price = entry_price + direction_multiplier * target_points
+                        profit_points = target_points
+                        result = "DailyTarget"
+                        break
+                else:
+                    if favorable_points >= remaining_target_points:
+                        exit_index = index
+                        exit_price = entry_price + direction_multiplier * remaining_target_points
+                        profit_points = remaining_target_points
+                        result = "RecoveryTarget"
+                        break
+                    current_direction = bar_direction(bar)
+                    if current_direction != "Flat" and current_direction != direction:
+                        exit_index = index
+                        exit_price = bar["close"]
+                        profit_points = (exit_price - entry_price) * direction_multiplier
+                        result = "OppositeClose"
+                        break
+
+            if exit_index is None:
+                exit_index = entry_index
+                exit_price = entry_price
+                profit_points = 0.0
+                result = "NoExit"
+
+            daily_profit_points += profit_points
+            trades.append({
+                "campaign": campaign_name,
+                "entry_time": entry_bar["time"],
+                "entry_barIndex": entry_index,
+                "direction": direction,
+                "entry_price": entry_price,
+                "exit_time": data[exit_index]["time"],
+                "exit_barIndex": exit_index,
+                "exit_price": exit_price,
+                "result": result,
+                "profit_points": profit_points,
+                "profit_bricks": profit_points / range_size,
+                "daily_profit_points": daily_profit_points,
+                "daily_profit_bricks": daily_profit_points / range_size,
+            })
+
+        daily_reports.append({
+            "date": date,
+            "net_profit_bricks": daily_profit_points / range_size,
+            "result": "Win" if daily_profit_points >= target_points else "Loss/Flat",
+            "success_time": trades[-1]["exit_time"] if daily_profit_points >= target_points and trades else None,
+            "trades_count": len(trades),
+            "trades": trades,
+            "skipped_trades": [],
+        })
+
+    result = summarize_campaign(daily_reports, 1.0, "mes_reg5_daily_recovery")
+    result["name"] = campaign_name
+    result["rules"] = {
+        "entry": "Close of MES Reg5 EMA Bounce Arity arrow bar",
+        "target": "Stop for the day at +1 bar (+5 ticks)",
+        "first_trade": "First trade wins at +5 ticks or loses at -10 ticks",
+        "recovery": "After a first loss, keep trading until daily P/L reaches +5 ticks; otherwise exit recovery trades on opposite-color close",
+        "session": f"{start_time} to {end_time}",
+        "range_size": range_size,
+        "tick_size": tick_size,
+    }
+    return result
+
 def run_yellow_momentum_campaign(data, signal_details, config):
     campaign_name = "Yellow Momentum 1:1"
     start_time = config.get("start_time", "06:31:00")
@@ -2578,6 +3242,10 @@ if __name__ == "__main__":
     try:
         data = load_json_data(chart_path)
         annotations = load_annotations(annotations_path, args.chart)
+        ha_data = []
+        ha_path = os.path.join(project_dir, "data", "MES_2sec_HA.json")
+        if args.chart in ("MES3", "MESM_reg_5") and os.path.exists(ha_path):
+            ha_data = load_json_data(ha_path)
         
         if args.optimize:
             best_config = run_optimization(data, annotations)
@@ -2596,10 +3264,19 @@ if __name__ == "__main__":
         yellow_momentum_details, yellow_momentum_evaluations = run_yellow_momentum_strategy(data, config)
         mes3_trend_tail_details, mes3_trend_tail_evaluations = run_mes3_trend_tail_strategy(data, config)
         mes3_previous_tail_details, mes3_previous_tail_evaluations = run_mes3_previous_tail_rejection_strategy(data, config)
+        mes3_ha_ema_approach_details = run_mes3_ha_ema_approach_strategy(data, ha_data, config)
+        mes_mes3_trend_tail_details = []  # wait, not needed, keep it clean
+        mes_reg5_long_tail_details, mes_reg5_long_tail_evaluations = run_mes_reg5_long_tail_strategy(data, config)
+        mes_reg5_ema_bounce_arity_details, mes_reg5_ema_bounce_arity_evaluations = run_mes_reg5_ema_bounce_arity_strategy(data, config)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         campaign_results = run_daily_campaign(data, signal_details, config, exit_strategy=args.exit_strategy)
         ema_bounce_campaign_results = run_ema_bounce_campaign(data, signal_set_2_details, config)
         yellow_momentum_campaign_results = run_yellow_momentum_campaign(data, yellow_momentum_details, config)
+        mes_reg5_daily_recovery_campaign_results = run_mes_reg5_daily_recovery_campaign(
+            data,
+            mes_reg5_ema_bounce_arity_details,
+            config,
+        )
         
         if args.json:
             result = {
@@ -2617,9 +3294,15 @@ if __name__ == "__main__":
                 "mes3_trend_tail_evaluations": mes3_trend_tail_evaluations,
                 "mes3_previous_tail_details": mes3_previous_tail_details,
                 "mes3_previous_tail_evaluations": mes3_previous_tail_evaluations,
+                "mes3_ha_ema_approach_details": mes3_ha_ema_approach_details,
+                "mes_reg5_long_tail_details": mes_reg5_long_tail_details,
+                "mes_reg5_long_tail_evaluations": mes_reg5_long_tail_evaluations,
+                "mes_reg5_ema_bounce_arity_details": mes_reg5_ema_bounce_arity_details,
+                "mes_reg5_ema_bounce_arity_evaluations": mes_reg5_ema_bounce_arity_evaluations,
                 "campaign_results": campaign_results,
                 "ema_bounce_campaign_results": ema_bounce_campaign_results,
                 "yellow_momentum_campaign_results": yellow_momentum_campaign_results,
+                "mes_reg5_daily_recovery_campaign_results": mes_reg5_daily_recovery_campaign_results,
                 "config": config,
                 "alignment": {
                     "matches_count": len(matches),
