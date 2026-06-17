@@ -51,6 +51,7 @@ export default function App() {
   const [activeChart, setActiveChart] = useState('');
   const [chartData, setChartData] = useState([]);
   const [secondaryChartData, setSecondaryChartData] = useState([]);
+  const [currentHaSelection, setCurrentHaSelection] = useState(null);
   const [allAnnotations, setAllAnnotations] = useState({});
   const [selectedBrick, setSelectedBrick] = useState(null);
   const [backtestResults, setBacktestResults] = useState(null);
@@ -321,6 +322,7 @@ export default function App() {
         fetchSecondaryChartData('MES_2sec_HA');
       } else {
         setSecondaryChartData([]);
+        setCurrentHaSelection(null);
       }
       fetchBacktest(activeChart);
       const savedBookmark = localStorage.getItem(bookmarkStorageKey(activeChart));
@@ -332,6 +334,7 @@ export default function App() {
     } else {
       setChartData([]);
       setSecondaryChartData([]);
+      setCurrentHaSelection(null);
       setBacktestResults(null);
       setBookmark(null);
     }
@@ -413,6 +416,25 @@ export default function App() {
     } catch (err) {
       console.error('Failed to fetch secondary chart data:', err);
       setSecondaryChartData([]);
+    }
+  };
+
+  const handleHaSelectionChange = async (selection) => {
+    setCurrentHaSelection(selection);
+    try {
+      await fetch(`${API_BASE}/ai-selection`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'heiken_ashi_range',
+          chart: activeChart,
+          secondaryChart: 'MES_2sec_HA',
+          selectedAt: new Date().toISOString(),
+          selection,
+        }),
+      });
+    } catch (err) {
+      console.error('Failed to publish Heiken Ashi selection:', err);
     }
   };
 
@@ -1653,6 +1675,11 @@ export default function App() {
                 {activeChart === 'MES3' && secondaryChartData.length > 0 && (
                   <div>HA 2s Bars: {secondaryChartData.length}</div>
                 )}
+                {currentHaSelection && (
+                  <div style={{ color: 'var(--primary)' }}>
+                    HA Selected: {currentHaSelection.barCount} bars · {currentHaSelection.linkedMesBarCount} MES
+                  </div>
+                )}
                 <div style={{ color: 'var(--text-secondary)' }}>Click on any Renko brick body or wick to add/edit annotations.</div>
               </div>
               <button
@@ -1667,6 +1694,7 @@ export default function App() {
                 secondaryData={activeChart === 'MES3' ? secondaryChartData : []}
                 annotations={mergedAnnotations}
                 onBrickClick={handleBrickClick}
+                onHaSelectionChange={handleHaSelectionChange}
                 bookmark={bookmark}
                 onSetBookmark={handleBookmarkBrick}
                 onClearBookmark={handleClearBookmark}

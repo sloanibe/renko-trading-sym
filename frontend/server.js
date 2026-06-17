@@ -95,8 +95,22 @@ app.post('/api/annotations', (req, res) => {
 app.post('/api/ai-selection', (req, res) => {
   try {
     const selection = req.body;
-    if (!selection?.chart || !Number.isInteger(selection?.selectedBar?.barIndex)) {
-      return res.status(400).json({ error: 'Selection must include a chart and bar index' });
+    const isBarSelection = selection?.chart && Number.isInteger(selection?.selectedBar?.barIndex);
+    const isHeikenAshiRange = (
+      selection?.type === 'heiken_ashi_range' &&
+      selection?.chart &&
+      (
+        selection.selection === null ||
+        (
+          selection.selection?.startTime &&
+          selection.selection?.endTime &&
+          Number.isInteger(selection.selection?.startBarIndex) &&
+          Number.isInteger(selection.selection?.endBarIndex)
+        )
+      )
+    );
+    if (!isBarSelection && !isHeikenAshiRange) {
+      return res.status(400).json({ error: 'Selection must include a chart bar or Heiken Ashi range' });
     }
 
     const tempPath = `${AI_SELECTION_PATH}.tmp`;

@@ -73,6 +73,14 @@ const parseOriginalTimeMs = (originalTime) => {
   return Date.parse(originalTime.endsWith('Z') ? originalTime : `${originalTime}Z`);
 };
 
+const formatSelectionTime = (originalTime) => {
+  const date = new Date(originalTime.endsWith('Z') ? originalTime : `${originalTime}Z`);
+  const hours = String(date.getUTCHours()).padStart(2, '0');
+  const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+  const seconds = String(date.getUTCSeconds()).padStart(2, '0');
+  return `${hours}:${minutes}:${seconds}`;
+};
+
 const findNearestBarByMs = (formattedData, targetMs) => {
   if (!formattedData?.length || Number.isNaN(targetMs)) return null;
 
@@ -515,6 +523,7 @@ export default function ChartComponent({
   secondaryData = [],
   annotations,
   onBrickClick,
+  onHaSelectionChange,
   bookmark,
   onSetBookmark,
   onClearBookmark,
@@ -542,11 +551,18 @@ export default function ChartComponent({
   const suppressNextClickRef = useRef(false);
   const longPressTimerRef = useRef(null);
   const hasSecondaryPaneRef = useRef(false);
+  const haSelectionRef = useRef(null);
+  const haSelectionDragRef = useRef(null);
+  const haSelectionModeRef = useRef(false);
   const [contextMenu, setContextMenu] = useState(null);
   const [secondaryPanePercent, setSecondaryPanePercent] = useState(30);
+  const [haSelectionMode, setHaSelectionMode] = useState(false);
+  const [haSelection, setHaSelection] = useState(null);
+  const [haSelectionOverlay, setHaSelectionOverlay] = useState(null);
 
   const hasSecondaryPane = secondaryData && secondaryData.length > 0;
   hasSecondaryPaneRef.current = hasSecondaryPane;
+  haSelectionModeRef.current = haSelectionMode;
 
   // Button & Slider Handlers
   const handleSliderInput = (e) => {
@@ -710,7 +726,9 @@ export default function ChartComponent({
     const nearestBar = findNearestBarByMs(formattedData, targetMs);
     const bestIndex = nearestBar?.originalIndex ?? 0;
 
-    const visibleBars = Math.min(180, formattedData.length);
+    const currentRange = chart.timeScale().getVisibleLogicalRange();
+    const currentWidth = currentRange ? currentRange.to - currentRange.from : 180;
+    const visibleBars = Math.max(12, Math.min(formattedData.length, currentWidth || 180));
     const from = Math.max(0, Math.min(formattedData.length - visibleBars, bestIndex - visibleBars / 2));
     const to = from + visibleBars;
     chart.timeScale().setVisibleLogicalRange({
@@ -791,6 +809,214 @@ export default function ChartComponent({
 
     const barIndex = Math.max(0, Math.min(formattedData.length - 1, Math.round(logicalIndex)));
     return formattedData[barIndex] || null;
+  };
+
+  const getVisiblePriceRange = (source) => {
+    const chart = source === 'primary' ? chartRef.current : secondaryChartRef.current;
+    const formattedData = source === 'primary'
+      ? primaryFormattedDataRef.current
+      : secondaryFormattedDataRef.current;
+    const scaleRange = chart?.priceScale('right').getVisibleRange();
+    if (scaleRange && Number.isFinite(scaleRange.from) && Number.isFinite(scaleRange.to) && scaleRange.to > scaleRange.from) {
+      return scaleRange;
+    }
+
+    const logicalRange = chart?.timeScale().getVisibleLogicalRange();
+    if (!logicalRange || !formattedData?.length) return null;
+    const start = Math.max(0, Math.floor(logicalRange.from));
+    const end = Math.min(formattedData.length - 1, Math.ceil(logicalRange.to));
+    const visibleData = formattedData.slice(start, end + 1);
+    const values = visibleData.flatMap(item => [
+      item.high,
+      item.low,
+      item.ema,
+      item.ema5,
+      item.ema10,
+      item.ma1,
+      item.ma2,
+    ]).filter(Number.isFinite);
+    if (values.length === 0) return null;
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const padding = Math.max((max - min) * 0.12, 0.5);
+    return { from: min - padding, to: max + padding };
+  };
+
+  const handleVerticalWheelZoom = (source, event) => {
+    if (!event.ctrlKey) return;
+    const chart = source === 'primary' ? chartRef.current : secondaryChartRef.current;
+    const series = source === 'primary' ? candlestickSeriesRef.current : secondaryCandlestickSeriesRef.current;
+    const container = source === 'primary' ? chartContainerRef.current : secondaryChartContainerRef.current;
+    if (!chart || !series || !container) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const range = getVisiblePriceRange(source);
+    if (!range) return;
+
+    const rect = container.getBoundingClientRect();
+    const cursorPrice = series.coordinateToPrice(event.clientY - rect.top);
+    const anchor = Number.isFinite(cursorPrice) ? cursorPrice : (range.from + range.to) / 2;
+    const factor = event.deltaY < 0 ? 0.82 : 1.22;
+    const nextFrom = anchor - (anchor - range.from) * factor;
+    const nextTo = anchor + (range.to - anchor) * factor;
+    const minSpan = source === 'primary' ? 1 : 0.5;
+    if (nextTo - nextFrom < minSpan) return;
+
+    chart.priceScale('right').setVisibleRange({
+      from: nextFrom,
+      to: nextTo,
+    });
+  };
+
+  const mapSelectionBar = (bar) => ({
+    barIndex: bar.originalIndex,
+    time: bar.originalTime,
+    open: bar.open,
+    high: bar.high,
+    low: bar.low,
+    close: bar.close,
+    ma1: bar.ma1,
+    ma2: bar.ma2,
+  });
+
+  const updateHaSelectionOverlay = (selection = haSelectionRef.current) => {
+    const chart = secondaryChartRef.current;
+    if (!chart || !selection) {
+      setHaSelectionOverlay(null);
+      return;
+    }
+
+    const startX = chart.timeScale().timeToCoordinate(selection.startChartTime);
+    const endX = chart.timeScale().timeToCoordinate(selection.endChartTime);
+    if (startX === null || endX === null) {
+      setHaSelectionOverlay(null);
+      return;
+    }
+
+    setHaSelectionOverlay({
+      left: Math.min(startX, endX),
+      width: Math.max(3, Math.abs(endX - startX)),
+    });
+  };
+
+  const clearHaSelection = () => {
+    haSelectionRef.current = null;
+    setHaSelection(null);
+    setHaSelectionOverlay(null);
+    onHaSelectionChange?.(null);
+  };
+
+  const createHaSelection = (startBar, endBar) => {
+    const formattedData = secondaryFormattedDataRef.current;
+    if (!startBar || !endBar || !formattedData?.length) return null;
+
+    const startIndex = Math.min(startBar.originalIndex, endBar.originalIndex);
+    const endIndex = Math.max(startBar.originalIndex, endBar.originalIndex);
+    const selectedBars = formattedData.slice(startIndex, endIndex + 1);
+    if (selectedBars.length === 0) return null;
+
+    const startTime = selectedBars[0].originalTime;
+    const endTime = selectedBars[selectedBars.length - 1].originalTime;
+    const startMs = parseOriginalTimeMs(startTime);
+    const endMs = parseOriginalTimeMs(endTime);
+    const linkedMesBars = primaryFormattedDataRef.current
+      .filter(bar => {
+        const barMs = parseOriginalTimeMs(bar.originalTime);
+        return barMs >= startMs && barMs <= endMs;
+      })
+      .map(bar => ({
+        barIndex: bar.originalIndex,
+        time: bar.originalTime,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+        ema: bar.ema,
+        ema5: bar.ema5,
+        ema10: bar.ema10,
+      }));
+
+    const highs = selectedBars.map(bar => bar.high).filter(Number.isFinite);
+    const lows = selectedBars.map(bar => bar.low).filter(Number.isFinite);
+    const first = selectedBars[0];
+    const last = selectedBars[selectedBars.length - 1];
+
+    return {
+      source: 'heiken_ashi',
+      startTime,
+      endTime,
+      startChartTime: first.time,
+      endChartTime: last.time,
+      startBarIndex: startIndex,
+      endBarIndex: endIndex,
+      barCount: selectedBars.length,
+      linkedMesBarCount: linkedMesBars.length,
+      high: highs.length ? Math.max(...highs) : null,
+      low: lows.length ? Math.min(...lows) : null,
+      open: first.open,
+      close: last.close,
+      ma1Start: first.ma1,
+      ma1End: last.ma1,
+      ma2Start: first.ma2,
+      ma2End: last.ma2,
+      bars: selectedBars.map(mapSelectionBar),
+      linkedMesBars,
+    };
+  };
+
+  const applyHaSelection = (selection) => {
+    haSelectionRef.current = selection;
+    setHaSelection(selection);
+    updateHaSelectionOverlay(selection);
+    onHaSelectionChange?.(selection);
+  };
+
+  const previewHaSelection = (selection) => {
+    haSelectionRef.current = selection;
+    setHaSelection(selection);
+    updateHaSelectionOverlay(selection);
+  };
+
+  const startHaSelectionDrag = (event) => {
+    if (!haSelectionModeRef.current || !secondaryChartContainerRef.current) return false;
+    if (event.button !== 0) return false;
+
+    const rect = secondaryChartContainerRef.current.getBoundingClientRect();
+    const startBar = getNearestSourceBarFromCoordinate('secondary', event.clientX - rect.left);
+    if (!startBar) return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+    cancelLongPressSync();
+    haSelectionDragRef.current = { startBar, latestSelection: createHaSelection(startBar, startBar) };
+    previewHaSelection(haSelectionDragRef.current.latestSelection);
+
+    const handleMouseMove = (moveEvent) => {
+      const currentBar = getNearestSourceBarFromCoordinate('secondary', moveEvent.clientX - rect.left);
+      if (!currentBar || !haSelectionDragRef.current) return;
+
+      const selection = createHaSelection(haSelectionDragRef.current.startBar, currentBar);
+      if (!selection) return;
+      haSelectionDragRef.current.latestSelection = selection;
+      previewHaSelection(selection);
+    };
+
+    const handleMouseUp = () => {
+      const finalSelection = haSelectionDragRef.current?.latestSelection;
+      haSelectionDragRef.current = null;
+      window.removeEventListener('mousemove', handleMouseMove, true);
+      window.removeEventListener('mouseup', handleMouseUp, true);
+      if (finalSelection) applyHaSelection(finalSelection);
+      haSelectionModeRef.current = false;
+      setHaSelectionMode(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove, true);
+    window.addEventListener('mouseup', handleMouseUp, true);
+    return true;
   };
 
   const startLongPressSync = (source, event) => {
@@ -1103,9 +1329,11 @@ export default function ChartComponent({
     const handlePrimaryMouseDown = (event) => {
       if (event.button === 0) startLongPressSync('primary', event);
     };
+    const handlePrimaryWheel = (event) => handleVerticalWheelZoom('primary', event);
     chartContainerRef.current.addEventListener('mousedown', handlePrimaryMouseDown, true);
     chartContainerRef.current.addEventListener('mouseup', cancelLongPressSync, true);
     chartContainerRef.current.addEventListener('mouseleave', cancelLongPressSync, true);
+    chartContainerRef.current.addEventListener('wheel', handlePrimaryWheel, { passive: false });
 
     // Handle Clicks for Annotation Placement (only on the actual bar)
     chart.subscribeClick((param) => {
@@ -1152,6 +1380,7 @@ export default function ChartComponent({
       chartContainerRef.current?.removeEventListener('mousedown', handlePrimaryMouseDown, true);
       chartContainerRef.current?.removeEventListener('mouseup', cancelLongPressSync, true);
       chartContainerRef.current?.removeEventListener('mouseleave', cancelLongPressSync, true);
+      chartContainerRef.current?.removeEventListener('wheel', handlePrimaryWheel);
       chart.remove();
       markersPluginRef.current = null;
       renkoOverlayRef.current = null;
@@ -1278,6 +1507,11 @@ export default function ChartComponent({
       to: formattedData.length,
     });
 
+    const handleSecondaryVisibleRangeChange = () => {
+      updateHaSelectionOverlay();
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleSecondaryVisibleRangeChange);
+
     chart.subscribeCrosshairMove((param) => {
       if (!param?.time) {
         clearSyncedCrosshair('secondary');
@@ -1292,11 +1526,14 @@ export default function ChartComponent({
     });
 
     const handleSecondaryMouseDown = (event) => {
+      if (startHaSelectionDrag(event)) return;
       if (event.button === 0) startLongPressSync('secondary', event);
     };
+    const handleSecondaryWheel = (event) => handleVerticalWheelZoom('secondary', event);
     secondaryChartContainerRef.current.addEventListener('mousedown', handleSecondaryMouseDown, true);
     secondaryChartContainerRef.current.addEventListener('mouseup', cancelLongPressSync, true);
     secondaryChartContainerRef.current.addEventListener('mouseleave', cancelLongPressSync, true);
+    secondaryChartContainerRef.current.addEventListener('wheel', handleSecondaryWheel, { passive: false });
 
     const handleResize = () => {
       if (secondaryChartContainerRef.current) {
@@ -1310,9 +1547,11 @@ export default function ChartComponent({
 
     return () => {
       window.removeEventListener('resize', handleResize);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleSecondaryVisibleRangeChange);
       secondaryChartContainerRef.current?.removeEventListener('mousedown', handleSecondaryMouseDown, true);
       secondaryChartContainerRef.current?.removeEventListener('mouseup', cancelLongPressSync, true);
       secondaryChartContainerRef.current?.removeEventListener('mouseleave', cancelLongPressSync, true);
+      secondaryChartContainerRef.current?.removeEventListener('wheel', handleSecondaryWheel);
       chart.remove();
       secondaryChartRef.current = null;
       secondaryCandlestickSeriesRef.current = null;
@@ -1633,22 +1872,42 @@ export default function ChartComponent({
                 position: 'relative',
               }}
             >
-              <div style={{
-                position: 'absolute',
-                top: '8px',
-                left: '12px',
-                zIndex: 2,
-                color: '#111827',
-                fontSize: '11px',
-                fontWeight: 700,
-                background: 'rgba(255,255,255,0.65)',
-                border: '1px solid rgba(0,0,0,0.18)',
-                padding: '3px 7px',
-                borderRadius: '4px',
-              }}>
-                MES 2s Heiken Ashi · MA1 10 EMA · MA2 60 SMA
-              </div>
               <div ref={secondaryChartContainerRef} style={{ width: '100%', height: '100%' }} />
+              {haSelectionOverlay && (
+                <div
+                  className="ha-selection-highlight"
+                  style={{
+                    left: `${haSelectionOverlay.left}px`,
+                    width: `${haSelectionOverlay.width}px`,
+                  }}
+                />
+              )}
+              <div className="ha-pane-toolbar">
+                <span>MES 2s Heiken Ashi · MA1 10 EMA · MA2 60 SMA</span>
+                {haSelection && (
+                  <span className="ha-selection-summary">
+                    {formatSelectionTime(haSelection.startTime)}-{formatSelectionTime(haSelection.endTime)} · {haSelection.barCount} bars
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className={`ha-selection-button ${haSelectionMode ? 'active' : ''}`}
+                  onMouseDown={event => event.stopPropagation()}
+                  onClick={() => setHaSelectionMode(enabled => !enabled)}
+                >
+                  {haSelectionMode ? 'Selecting' : 'Select Range'}
+                </button>
+                {haSelection && (
+                  <button
+                    type="button"
+                    className="ha-selection-button"
+                    onMouseDown={event => event.stopPropagation()}
+                    onClick={clearHaSelection}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
           </>
         )}
