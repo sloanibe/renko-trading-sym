@@ -1182,7 +1182,13 @@ export default function ChartComponent({
               return String(date.getUTCDate());
             case 3: // Time
             case 4: // TimeWithSeconds
-              return formatOriginalChartTime(time, originalTimeByChartTime);
+              {
+                const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(date.getUTCDate()).padStart(2, '0');
+                const hours = String(date.getUTCHours()).padStart(2, '0');
+                const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                return `${month}/${day} ${hours}:${minutes}`;
+              }
             default:
               return '';
           }
@@ -1511,7 +1517,13 @@ export default function ChartComponent({
               return String(date.getUTCDate());
             case 3:
             case 4:
-              return formatOriginalChartTime(time, originalTimeByChartTime);
+              {
+                const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+                const day = String(date.getUTCDate()).padStart(2, '0');
+                const hours = String(date.getUTCHours()).padStart(2, '0');
+                const minutes = String(date.getUTCMinutes()).padStart(2, '0');
+                return `${month}/${day} ${hours}:${minutes}`;
+              }
             default:
               return '';
           }
