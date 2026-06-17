@@ -3,6 +3,28 @@ import { createChart, CandlestickSeries, LineSeries, createSeriesMarkers } from 
 
 const SESSION_OPEN_TIME = '06:30:00';
 
+const formatTimeLabel = (isoString) => {
+  if (!isoString) return '';
+  try {
+    const parts = isoString.split('T');
+    if (parts.length < 2) return isoString;
+    const datePart = parts[0];
+    const timePart = parts[1].split('.')[0].replace('Z', '');
+    
+    // Shorten Date: "2026-06-17" -> "06/17"
+    const dateSubparts = datePart.split('-');
+    const shortDate = dateSubparts.length >= 3 ? `${dateSubparts[1]}/${dateSubparts[2]}` : datePart;
+    
+    // Shorten Time: "06:41:52" -> "06:41"
+    const timeSubparts = timePart.split(':');
+    const shortTime = timeSubparts.length >= 2 ? `${timeSubparts[0]}:${timeSubparts[1]}` : timePart;
+    
+    return `${shortDate} ${shortTime}`;
+  } catch {
+    return isoString;
+  }
+};
+
 const getSessionOpenIndices = (data) => {
   const firstBarByDate = new Map();
   data.forEach((bar, index) => {
@@ -550,6 +572,8 @@ export default function ChartComponent({
   const renkoOverlayRef = useRef(null);
   const markersPluginRef = useRef(null);
   const sliderRef = useRef(null);
+  const sliderStartTextRef = useRef(null);
+  const sliderEndTextRef = useRef(null);
   const crosshairBarIndexRef = useRef(null);
   const primaryFormattedDataRef = useRef([]);
   const secondaryFormattedDataRef = useRef([]);
@@ -1312,6 +1336,20 @@ export default function ChartComponent({
         sliderRef.current.max = maxVal;
         sliderRef.current.value = Math.min(maxVal, Math.max(0, from));
       }
+
+      if (formattedData.length > 0) {
+        const fromIdx = Math.min(formattedData.length - 1, Math.max(0, Math.floor(from)));
+        const toIdx = Math.min(formattedData.length - 1, Math.max(0, Math.floor(to - 1)));
+        const fromBar = formattedData[fromIdx];
+        const toBar = formattedData[toIdx];
+
+        if (sliderStartTextRef.current && fromBar) {
+          sliderStartTextRef.current.textContent = formatTimeLabel(fromBar.originalTime);
+        }
+        if (sliderEndTextRef.current && toBar) {
+          sliderEndTextRef.current.textContent = formatTimeLabel(toBar.originalTime);
+        }
+      }
     };
     chart.timeScale().subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
     chart.subscribeCrosshairMove((param) => {
@@ -2058,7 +2096,12 @@ export default function ChartComponent({
       )}
       <div className="chart-controls">
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-          <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '40px' }}>Start</span>
+          <span
+            ref={sliderStartTextRef}
+            style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '80px', textAlign: 'left', whiteSpace: 'nowrap' }}
+          >
+            Start
+          </span>
           <input
             ref={sliderRef}
             type="range"
@@ -2068,7 +2111,12 @@ export default function ChartComponent({
             onInput={handleSliderInput}
             className="timeline-slider"
           />
-          <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '40px', textAlign: 'right' }}>End</span>
+          <span
+            ref={sliderEndTextRef}
+            style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)', minWidth: '80px', textAlign: 'right', whiteSpace: 'nowrap' }}
+          >
+            End
+          </span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
