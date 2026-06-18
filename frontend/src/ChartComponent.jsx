@@ -2137,6 +2137,25 @@ export default function ChartComponent({
               size: 2,
               text: 'FAST',
             });
+          } else if (ann.isMesReg5RecoveryPaperEntry) {
+            markers.push({
+              time: chartTime,
+              position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
+              color: '#7c3aed',
+              shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
+              size: 2,
+              preserveColor: true,
+              text: 'P',
+            });
+          } else if (ann.isMesReg5RecoveryPaperExit) {
+            markers.push({
+              time: chartTime,
+              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar',
+              color: '#7c3aed',
+              shape: 'square',
+              size: 2,
+              text: 'P',
+            });
           } else if (ann.isMesReg5RecoveryCampaignExit) {
             const dailyProfit = Number(ann.dailyProfitBricks);
             const tradeProfit = Number(ann.profitBricks);
@@ -2354,7 +2373,7 @@ export default function ChartComponent({
     markers.sort((a, b) => a.time - b.time);
 
     const finalMarkers = markers.map(m => {
-      if (m.shape === 'arrowUp' || m.shape === 'arrowDown') {
+      if (!m.preserveColor && (m.shape === 'arrowUp' || m.shape === 'arrowDown')) {
         return { ...m, color: '#000000' };
       }
       return m;

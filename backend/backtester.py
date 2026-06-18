@@ -97,7 +97,7 @@ DEFAULT_CONFIG = {
     "mes_reg5_ema_bounce_arity_strong_max_reversals": 5,
     "mes_reg5_ema_bounce_arity_base_max_overlap": 0.68,
     "mes_reg5_ema_bounce_arity_strong_max_overlap": 0.86,
-    "mes_reg5_ema_bounce_arity_buy_low_to_ema_max": 0.25,
+    "mes_reg5_ema_bounce_arity_buy_low_to_ema_max": 0.30,
     "mes_reg5_ema_bounce_arity_sell_high_to_ema_min": 0.00,
     "mes_reg5_ema_bounce_arity_extended_buy_low_to_ema_max": 0.65,
     "mes_reg5_ema_bounce_arity_extended_sell_high_to_ema_min": 0.00,
@@ -111,7 +111,7 @@ DEFAULT_CONFIG = {
     "mes_reg5_ema_bounce_arity_pin_max_reversals": 2,
     "mes_reg5_ema_bounce_arity_max_chase_distance": 1.25,
     "mes_reg5_ema_bounce_arity_min_close_dist_buy": 0.40,
-    "mes_reg5_ema_bounce_arity_min_close_dist_sell": 0.75,
+    "mes_reg5_ema_bounce_arity_min_close_dist_sell": 0.72,
     "mes_reg5_ema_bounce_arity_cooldown_bars": 2,
 }
 
@@ -732,38 +732,83 @@ def run_mes_reg5_long_tail_strategy(data, config):
 
 def run_mes_reg5_ema_bounce_arity_strategy(data, config):
     signal_details = []
+
+    # Calculate scale relative to baseline MESM_reg_5 range size (1.25 points)
+    range_size = infer_range_size(data)
+    scale = range_size / 1.25
+
     slope_period = max(1, config.get("mes_reg5_ema_bounce_arity_slope_period", 8))
     short_slope_period = max(1, config.get("mes_reg5_ema_bounce_arity_short_slope_period", 4))
-    slope_threshold = config.get("mes_reg5_ema_bounce_arity_slope_threshold", 0.20)
-    short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_short_slope_threshold", 0.28)
-    relaxed_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_relaxed_short_slope_threshold", 0.18)
-    strong_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_strong_short_slope_threshold", 0.30)
-    strong_slope_threshold = config.get("mes_reg5_ema_bounce_arity_strong_slope_threshold", 0.22)
-    extended_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_extended_short_slope_threshold", 0.36)
+    slope_threshold = config.get("mes_reg5_ema_bounce_arity_slope_threshold", 0.20) * scale
+    short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_short_slope_threshold", 0.28) * scale
+    relaxed_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_relaxed_short_slope_threshold", 0.18) * scale
+    strong_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_strong_short_slope_threshold", 0.30) * scale
+    strong_slope_threshold = config.get("mes_reg5_ema_bounce_arity_strong_slope_threshold", 0.22) * scale
+    extended_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_extended_short_slope_threshold", 0.36) * scale
     lookback = max(2, config.get("mes_reg5_ema_bounce_arity_lookback", 8))
     base_max_reversals = config.get("mes_reg5_ema_bounce_arity_base_max_reversals", 4)
     strong_max_reversals = config.get("mes_reg5_ema_bounce_arity_strong_max_reversals", base_max_reversals + 1)
     base_max_overlap = config.get("mes_reg5_ema_bounce_arity_base_max_overlap", 0.72)
     strong_max_overlap = config.get("mes_reg5_ema_bounce_arity_strong_max_overlap", 0.88)
-    buy_low_to_ema_max = config.get("mes_reg5_ema_bounce_arity_buy_low_to_ema_max", 0.65)
-    sell_high_to_ema_min = config.get("mes_reg5_ema_bounce_arity_sell_high_to_ema_min", -1.10)
+    buy_low_to_ema_max = config.get("mes_reg5_ema_bounce_arity_buy_low_to_ema_max", 0.65) * scale
+    sell_high_to_ema_min = config.get("mes_reg5_ema_bounce_arity_sell_high_to_ema_min", -1.10) * scale
     extended_buy_low_to_ema_max = config.get("mes_reg5_ema_bounce_arity_extended_buy_low_to_ema_max", buy_low_to_ema_max)
     extended_sell_high_to_ema_min = config.get("mes_reg5_ema_bounce_arity_extended_sell_high_to_ema_min", sell_high_to_ema_min)
-    extended_min_tail = config.get("mes_reg5_ema_bounce_arity_extended_min_tail", 0.75)
-    pin_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_pin_short_slope_threshold", 0.70)
-    pin_slope_threshold = config.get("mes_reg5_ema_bounce_arity_pin_slope_threshold", 0.55)
-    pin_min_tail = config.get("mes_reg5_ema_bounce_arity_pin_min_tail", 1.00)
-    pin_min_ema_distance = config.get("mes_reg5_ema_bounce_arity_pin_min_ema_distance", 1.00)
-    pin_max_ema_distance = config.get("mes_reg5_ema_bounce_arity_pin_max_ema_distance", 1.60)
+    extended_min_tail = config.get("mes_reg5_ema_bounce_arity_extended_min_tail", 0.75) * scale
+    pin_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_pin_short_slope_threshold", 0.70) * scale
+    pin_slope_threshold = config.get("mes_reg5_ema_bounce_arity_pin_slope_threshold", 0.55) * scale
+    pin_min_tail = config.get("mes_reg5_ema_bounce_arity_pin_min_tail", 1.00) * scale
+    pin_min_ema_distance = config.get("mes_reg5_ema_bounce_arity_pin_min_ema_distance", 1.00) * scale
+    pin_max_ema_distance = config.get("mes_reg5_ema_bounce_arity_pin_max_ema_distance", 1.60) * scale
     pin_max_overlap = config.get("mes_reg5_ema_bounce_arity_pin_max_overlap", 0.50)
     pin_max_reversals = config.get("mes_reg5_ema_bounce_arity_pin_max_reversals", 2)
-    max_chase_distance = config.get("mes_reg5_ema_bounce_arity_max_chase_distance", 1.25)
-    min_close_dist_buy = config.get("mes_reg5_ema_bounce_arity_min_close_dist_buy", 0.50)
-    min_close_dist_sell = config.get("mes_reg5_ema_bounce_arity_min_close_dist_sell", 1.00)
+    max_chase_distance = config.get("mes_reg5_ema_bounce_arity_max_chase_distance", 1.25) * scale
+    min_close_dist_buy = config.get("mes_reg5_ema_bounce_arity_min_close_dist_buy", 0.50) * scale
+    min_close_dist_sell = config.get("mes_reg5_ema_bounce_arity_min_close_dist_sell", 1.00) * scale
     cooldown_bars = max(0, config.get("mes_reg5_ema_bounce_arity_cooldown_bars", 3))
     last_signal_index = -999999
 
     start_index = max(slope_period, short_slope_period, lookback - 1)
+
+    def body_range(bar):
+        return min(bar["open"], bar["close"]), max(bar["open"], bar["close"])
+
+    def overlap_length(first, second):
+        return max(0.0, min(first[1], second[1]) - max(first[0], second[0]))
+
+    def calculate_left_body_wall(index, wall_lookback=6, min_body=0.75 * scale, zone_pad=0.25 * scale):
+        current_bar = data[index]
+        current_body = body_range(current_bar)
+        current_ema = current_bar.get("ema")
+        zone_low = min(current_body[0], current_ema if current_ema is not None else current_body[0]) - zone_pad
+        zone_high = max(current_body[1], current_ema if current_ema is not None else current_body[1]) + zone_pad
+        zone = (zone_low, zone_high)
+        count = 0
+        body_sum = 0.0
+        shelf_lows = []
+        shelf_highs = []
+
+        for left_index in range(max(0, index - wall_lookback), index):
+            left_bar = data[left_index]
+            left_body = body_range(left_bar)
+            body_size = left_body[1] - left_body[0]
+            if body_size < min_body:
+                continue
+            overlap = overlap_length(zone, left_body)
+            overlap_ratio = overlap / body_size if body_size else 0.0
+            if overlap_ratio < 0.45:
+                continue
+            count += 1
+            body_sum += body_size
+            shelf_lows.append(left_body[0])
+            shelf_highs.append(left_body[1])
+
+        shelf_span = max(shelf_highs) - min(shelf_lows) if shelf_highs else 0.0
+        return {
+            "count": count,
+            "bodySum": body_sum,
+            "shelfSpan": shelf_span,
+        }
 
     for i in range(start_index, len(data)):
         if i - last_signal_index <= cooldown_bars:
@@ -872,10 +917,26 @@ def run_mes_reg5_ema_bounce_arity_strategy(data, config):
         if not action:
             continue
         if action == "Buy":
-            touched_ema = low_to_ema <= 0
+            touched_ema = low_to_ema <= buy_low_to_ema_max
         else:
             touched_ema = high_to_ema >= 0
         if not touched_ema and abs(close_to_ema) > max_chase_distance:
+            continue
+
+        rejection_tail = lower_tail if action == "Buy" else upper_tail
+        is_protected_strong_tail = (
+            is_strong_trend and
+            abs(short_ema_slope) >= 0.42 * scale and
+            rejection_tail >= 0.75 * scale
+        )
+        left_body_wall = calculate_left_body_wall(i)
+        has_left_body_wall = (
+            left_body_wall["count"] >= 5 and
+            left_body_wall["bodySum"] >= 4.0 * scale and
+            left_body_wall["shelfSpan"] <= 2.25 * scale and
+            not is_protected_strong_tail
+        )
+        if has_left_body_wall:
             continue
 
         signal_details.append({
@@ -897,6 +958,9 @@ def run_mes_reg5_ema_bounce_arity_strategy(data, config):
                 "lowerTail": lower_tail,
                 "usedExtendedTail": buy_extended_tail if action == "Buy" else sell_extended_tail,
                 "usedPinBar": setup_type == "mesReg5StrongTrendPinBar",
+                "leftBodyWall": left_body_wall,
+                "rejectionTail": rejection_tail,
+                "protectedStrongTail": is_protected_strong_tail,
             },
         })
         last_signal_index = i
@@ -2523,6 +2587,8 @@ def write_mes_reg5_daily_recovery_report(report):
         f"- Day win rate: {summary.get('win_rate', 0.0):.1f}%",
         f"- Total trades: {summary.get('total_trades', 0)}",
         f"- Fast-market skipped signals: {summary.get('total_skipped_trades', 0)}",
+        f"- Paper quarantine trades: {summary.get('total_paper_trades', 0)}",
+        f"- Quarantine events: {summary.get('total_quarantine_entries', 0)}",
         f"- Net result: {summary.get('net_profit_bricks', 0.0):.1f} bars / {summary.get('net_profit_bricks', 0.0) * range_size / tick_size:.0f} ticks",
         f"- Max campaign drawdown: {summary.get('max_drawdown_bricks', 0.0):.1f} bars / {summary.get('max_drawdown_bricks', 0.0) * range_size / tick_size:.0f} ticks",
         "",
@@ -2530,7 +2596,7 @@ def write_mes_reg5_daily_recovery_report(report):
         "",
     ]
 
-    for key in ["entry", "target", "warmup", "fast_market_skip", "first_trade", "recovery", "session"]:
+    for key in ["entry", "target", "warmup", "fast_market_skip", "first_trade", "recovery", "quarantine", "session"]:
         if key in rules:
             lines.append(f"- {key.replace('_', ' ').title()}: {rules[key]}")
 
@@ -2538,8 +2604,8 @@ def write_mes_reg5_daily_recovery_report(report):
         "",
         "## Daily Breakdown",
         "",
-        "| Date | Result | Trades | Fast Skips | Net Bars | Net Ticks | First Entry | Done Time |",
-        "|---|---:|---:|---:|---:|---:|---|---|",
+        "| Date | Result | Trades | Paper | Fast Skips | Net Bars | Net Ticks | First Entry | Done Time |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|",
     ])
 
     for day in report.get("daily_reports", []):
@@ -2547,8 +2613,9 @@ def write_mes_reg5_daily_recovery_report(report):
         first_entry = time_only(day["trades"][0]["entry_time"]) if day.get("trades") else ""
         net_ticks = day.get("net_profit_bricks", 0.0) * range_size / tick_size if tick_size else 0.0
         fast_skips = len(day.get("skipped_trades", []))
+        paper_trades = len(day.get("paper_trades", []))
         lines.append(
-            f"| {day['date']} | {day['result']} | {day['trades_count']} | {fast_skips} | "
+            f"| {day['date']} | {day['result']} | {day['trades_count']} | {paper_trades} | {fast_skips} | "
             f"{day.get('net_profit_bricks', 0.0):.1f} | {net_ticks:.0f} | {first_entry} | {done_time} |"
         )
 
@@ -2566,6 +2633,21 @@ def write_mes_reg5_daily_recovery_report(report):
                 f"{time_only(trade['exit_time'])} | {trade['exit_price']:.2f} | {trade['result']} | "
                 f"{ticks(trade.get('profit_points', 0.0)):.0f} | {ticks(trade.get('daily_profit_points', 0.0)):.0f} |"
             )
+        paper_trades = day.get("paper_trades", [])
+        if paper_trades:
+            lines.extend([
+                "",
+                "Paper quarantine trades:",
+                "",
+                "| # | Direction | Entry | Exit | Result | Paper P/L Ticks |",
+                "|---:|---|---|---|---|---:|",
+            ])
+            for index, trade in enumerate(paper_trades, 1):
+                lines.append(
+                    f"| {index} | {trade['direction']} | {time_only(trade['entry_time'])} | "
+                    f"{time_only(trade['exit_time'])} | {trade['result']} | "
+                    f"{ticks(trade.get('profit_points', 0.0)):.0f} |"
+                )
         skipped_trades = day.get("skipped_trades", [])
         if skipped_trades:
             lines.extend([
@@ -2594,11 +2676,13 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
     start_time = "06:30:00"
     end_time = "14:00:00"
     tick_size = infer_price_increment(data)
-    range_size = tick_size * 5
+    range_size = infer_range_size(data)
     target_points = range_size
-    first_stop_points = tick_size * 10
+    stop_points = range_size * 1.5
     warmup_bars = 10
     min_manual_signal_seconds = 3.0
+    quarantine_loss_threshold = 3
+    quarantine_required_paper_wins = 1
 
     def bar_direction(bar):
         if bar["close"] > bar["open"]:
@@ -2647,8 +2731,13 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
         )
         daily_profit_points = 0.0
         trades = []
+        paper_trades = []
         skipped_trades = []
         next_eligible_entry_index = -1
+        consecutive_losses = 0
+        in_quarantine = False
+        paper_wins = 0
+        quarantine_entries = 0
 
         for signal in day_signals:
             if daily_profit_points >= target_points:
@@ -2711,11 +2800,11 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
                 )
                 if first_trade:
                     hit_target = favorable_points >= target_points
-                    hit_stop = adverse_points >= first_stop_points
+                    hit_stop = adverse_points >= stop_points
                     if hit_stop:
                         exit_index = index
-                        exit_price = entry_price - direction_multiplier * first_stop_points
-                        profit_points = -first_stop_points
+                        exit_price = entry_price - direction_multiplier * stop_points
+                        profit_points = -stop_points
                         result = "FirstStop"
                         break
                     if hit_target:
@@ -2731,10 +2820,10 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
                         profit_points = remaining_target_points
                         result = "RecoveryTarget"
                         break
-                    if adverse_points >= first_stop_points:
+                    if adverse_points >= stop_points:
                         exit_index = index
-                        exit_price = entry_price - direction_multiplier * first_stop_points
-                        profit_points = -first_stop_points
+                        exit_price = entry_price - direction_multiplier * stop_points
+                        profit_points = -stop_points
                         result = "RecoveryStop"
                         break
                     current_direction = bar_direction(bar)
@@ -2753,8 +2842,8 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
                 profit_points = 0.0
                 result = "NoExit"
 
-            daily_profit_points += profit_points
-            trades.append({
+            next_eligible_entry_index = exit_index
+            trade = {
                 "campaign": campaign_name,
                 "entry_time": entry_bar["time"],
                 "entry_barIndex": entry_index,
@@ -2766,11 +2855,41 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
                 "result": result,
                 "profit_points": profit_points,
                 "profit_bricks": profit_points / range_size,
+            }
+
+            if in_quarantine:
+                if profit_points > 0:
+                    paper_wins += 1
+                paper_trades.append({
+                    **trade,
+                    "paper_wins_in_window": paper_wins,
+                })
+                if paper_wins >= quarantine_required_paper_wins:
+                    in_quarantine = False
+                    consecutive_losses = 0
+                    paper_wins = 0
+                continue
+
+            daily_profit_points += profit_points
+            if profit_points < 0:
+                consecutive_losses += 1
+            elif profit_points > 0:
+                consecutive_losses = 0
+
+            trades.append({
+                **trade,
                 "daily_profit_points": daily_profit_points,
                 "daily_profit_bricks": daily_profit_points / range_size,
                 "is_campaign_complete": daily_profit_points >= target_points,
             })
-            next_eligible_entry_index = exit_index
+
+            if (
+                daily_profit_points < target_points and
+                consecutive_losses >= quarantine_loss_threshold
+            ):
+                in_quarantine = True
+                quarantine_entries += 1
+                paper_wins = 0
 
         daily_reports.append({
             "date": date,
@@ -2779,24 +2898,356 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
             "success_time": trades[-1]["exit_time"] if daily_profit_points >= target_points and trades else None,
             "trades_count": len(trades),
             "trades": trades,
+            "paper_trades": paper_trades,
             "skipped_trades": skipped_trades,
+            "quarantine_entries": quarantine_entries,
         })
 
     result = summarize_campaign(daily_reports, 1.0, "mes_reg5_daily_recovery")
     result["name"] = campaign_name
+    result["summary"]["total_paper_trades"] = sum(len(day.get("paper_trades", [])) for day in daily_reports)
+    result["summary"]["total_quarantine_entries"] = sum(day.get("quarantine_entries", 0) for day in daily_reports)
+    target_ticks = int(range_size / tick_size) if tick_size else 0
+    stop_ticks = int(stop_points / tick_size) if tick_size else 0
     result["rules"] = {
         "entry": "Close of MES Reg5 EMA Bounce Arity arrow bar",
-        "target": "Stop for the day at +1 bar (+5 ticks)",
+        "target": f"Stop for the day at +1 bar (+{target_ticks} ticks)",
         "warmup": "Ignore signals until at least 10 session bars have formed",
         "fast_market_skip": "Skip otherwise eligible signals when the signal bar forms less than 3 seconds after the previous bar",
-        "first_trade": "First trade wins at +5 ticks or loses at -10 ticks",
-        "recovery": "After a first loss, recovery trades hold until daily P/L reaches +5 ticks, a -10 tick trade stop is hit, or an opposite-color close appears while the trade is already profitable",
+        "first_trade": f"First trade wins at +{target_ticks} ticks or loses at -{stop_ticks} ticks (1.5 bars)",
+        "recovery": f"Recovery trades hold until daily P/L reaches +{target_ticks} ticks, a -{stop_ticks} tick trade stop is hit, or an opposite-color close appears while the trade is already profitable",
+        "quarantine": "After 3 consecutive real losses, paper-trade qualifying signals until 1 paper winner appears, then resume real trades",
         "session": f"{start_time} to {end_time}",
         "range_size": range_size,
         "tick_size": tick_size,
     }
     write_mes_reg5_daily_recovery_report(result)
     return result
+
+def run_mes_reg5_quarantine_experiments(data, signal_details, config):
+    start_time = "06:30:00"
+    end_time = "14:00:00"
+    tick_size = infer_price_increment(data)
+    range_size = infer_range_size(data)
+    target_points = range_size
+    first_stop_points = range_size * 2.0
+    warmup_bars = 10
+    min_manual_signal_seconds = 3.0
+
+    variants = [
+        {
+            "name": "after_2_losses_until_1_paper_win",
+            "loss_threshold": 2,
+            "resume_mode": "until_wins",
+            "required_paper_wins": 1,
+        },
+        {
+            "name": "after_3_losses_until_1_paper_win",
+            "loss_threshold": 3,
+            "resume_mode": "until_wins",
+            "required_paper_wins": 1,
+        },
+        {
+            "name": "after_2_losses_next_2_any_win",
+            "loss_threshold": 2,
+            "resume_mode": "block",
+            "paper_block_size": 2,
+            "required_paper_wins": 1,
+        },
+        {
+            "name": "after_2_losses_next_2_both_win",
+            "loss_threshold": 2,
+            "resume_mode": "block",
+            "paper_block_size": 2,
+            "required_paper_wins": 2,
+        },
+        {
+            "name": "after_3_losses_next_2_any_win",
+            "loss_threshold": 3,
+            "resume_mode": "block",
+            "paper_block_size": 2,
+            "required_paper_wins": 1,
+        },
+    ]
+
+    def bar_direction(bar):
+        if bar["close"] > bar["open"]:
+            return "Buy"
+        if bar["close"] < bar["open"]:
+            return "Sell"
+        return "Flat"
+
+    def in_session(timestamp):
+        time = timestamp.split("T")[1].replace("Z", "")
+        return start_time <= time <= end_time
+
+    def seconds_from_previous_bar(index):
+        if index <= 0:
+            return None
+        try:
+            current_time = datetime.fromisoformat(data[index]["time"].replace("Z", "+00:00"))
+            previous_time = datetime.fromisoformat(data[index - 1]["time"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            return None
+        return (current_time - previous_time).total_seconds()
+
+    def simulate_trade(signal, daily_profit_points, real_trade_count, date):
+        entry_index = signal["barIndex"]
+        entry_bar = data[entry_index]
+        direction = signal["action"]
+        direction_multiplier = 1 if direction == "Buy" else -1
+        entry_price = entry_bar["close"]
+        first_trade = real_trade_count == 0
+        remaining_target_points = target_points - daily_profit_points
+        exit_index = None
+        exit_price = None
+        profit_points = None
+        result = None
+
+        for index in range(entry_index + 1, len(data)):
+            bar = data[index]
+            if bar["time"].split("T")[0] != date or not in_session(bar["time"]):
+                exit_index = max(entry_index, index - 1)
+                exit_bar = data[exit_index]
+                exit_price = exit_bar["close"]
+                profit_points = (exit_price - entry_price) * direction_multiplier
+                result = "EndSession"
+                break
+
+            favorable_points = (
+                bar["high"] - entry_price
+                if direction == "Buy"
+                else entry_price - bar["low"]
+            )
+            adverse_points = (
+                entry_price - bar["low"]
+                if direction == "Buy"
+                else bar["high"] - entry_price
+            )
+            if first_trade:
+                if adverse_points >= first_stop_points:
+                    exit_index = index
+                    exit_price = entry_price - direction_multiplier * first_stop_points
+                    profit_points = -first_stop_points
+                    result = "FirstStop"
+                    break
+                if favorable_points >= target_points:
+                    exit_index = index
+                    exit_price = entry_price + direction_multiplier * target_points
+                    profit_points = target_points
+                    result = "DailyTarget"
+                    break
+            else:
+                if favorable_points >= remaining_target_points:
+                    exit_index = index
+                    exit_price = entry_price + direction_multiplier * remaining_target_points
+                    profit_points = remaining_target_points
+                    result = "RecoveryTarget"
+                    break
+                if adverse_points >= first_stop_points:
+                    exit_index = index
+                    exit_price = entry_price - direction_multiplier * first_stop_points
+                    profit_points = -first_stop_points
+                    result = "RecoveryStop"
+                    break
+                current_direction = bar_direction(bar)
+                if current_direction != "Flat" and current_direction != direction:
+                    current_profit_points = (bar["close"] - entry_price) * direction_multiplier
+                    if current_profit_points > 0:
+                        exit_index = index
+                        exit_price = bar["close"]
+                        profit_points = current_profit_points
+                        result = "OppositeClose"
+                        break
+
+        if exit_index is None:
+            exit_index = entry_index
+            exit_price = entry_price
+            profit_points = 0.0
+            result = "NoExit"
+
+        return {
+            "entry_time": entry_bar["time"],
+            "entry_barIndex": entry_index,
+            "direction": direction,
+            "entry_price": entry_price,
+            "exit_time": data[exit_index]["time"],
+            "exit_barIndex": exit_index,
+            "exit_price": exit_price,
+            "result": result,
+            "profit_points": profit_points,
+            "profit_bricks": profit_points / range_size,
+        }
+
+    date_to_bar_indices = {}
+    for index, bar in enumerate(data):
+        date = bar["time"].split("T")[0]
+        date_to_bar_indices.setdefault(date, []).append(index)
+
+    date_to_signals = {}
+    for signal in signal_details:
+        date = signal["timestamp"].split("T")[0]
+        if in_session(signal["timestamp"]):
+            date_to_signals.setdefault(date, []).append(signal)
+
+    def run_variant(variant):
+        daily_reports = []
+        total_paper_trades = 0
+        total_quarantine_entries = 0
+        avoided_loss_points = 0.0
+        missed_profit_points = 0.0
+
+        for date in sorted(date_to_signals):
+            day_signals = sorted(date_to_signals[date], key=lambda signal: signal["barIndex"])
+            session_bar_indices = [
+                index
+                for index in date_to_bar_indices.get(date, [])
+                if in_session(data[index]["time"])
+            ]
+            first_eligible_entry_index = (
+                session_bar_indices[warmup_bars]
+                if len(session_bar_indices) > warmup_bars
+                else 999999999
+            )
+            daily_profit_points = 0.0
+            trades = []
+            paper_trades = []
+            skipped_trades = []
+            next_eligible_entry_index = -1
+            consecutive_losses = 0
+            in_quarantine = False
+            paper_wins = 0
+            paper_seen = 0
+            day_quarantine_entries = 0
+
+            for signal in day_signals:
+                if daily_profit_points >= target_points:
+                    break
+
+                entry_index = signal["barIndex"]
+                if entry_index < first_eligible_entry_index:
+                    continue
+                if entry_index <= next_eligible_entry_index:
+                    continue
+
+                entry_bar = data[entry_index]
+                if not in_session(entry_bar["time"]):
+                    continue
+
+                seconds_since_previous = seconds_from_previous_bar(entry_index)
+                if (
+                    seconds_since_previous is not None and
+                    seconds_since_previous < min_manual_signal_seconds
+                ):
+                    skipped_trades.append({
+                        "time": entry_bar["time"],
+                        "barIndex": entry_index,
+                        "direction": signal["action"],
+                        "reason": "FastMarket",
+                        "seconds_since_previous_bar": seconds_since_previous,
+                    })
+                    continue
+
+                trade = simulate_trade(signal, daily_profit_points, len(trades), date)
+                next_eligible_entry_index = trade["exit_barIndex"]
+
+                if in_quarantine:
+                    total_paper_trades += 1
+                    paper_seen += 1
+                    if trade["profit_points"] > 0:
+                        paper_wins += 1
+                        missed_profit_points += trade["profit_points"]
+                    elif trade["profit_points"] < 0:
+                        avoided_loss_points += abs(trade["profit_points"])
+
+                    paper_trades.append({
+                        **trade,
+                        "paper_wins_in_window": paper_wins,
+                        "paper_seen_in_window": paper_seen,
+                    })
+
+                    if variant["resume_mode"] == "until_wins":
+                        if paper_wins >= variant["required_paper_wins"]:
+                            in_quarantine = False
+                            consecutive_losses = 0
+                            paper_wins = 0
+                            paper_seen = 0
+                    elif paper_seen >= variant["paper_block_size"]:
+                        if paper_wins >= variant["required_paper_wins"]:
+                            in_quarantine = False
+                            consecutive_losses = 0
+                        paper_wins = 0
+                        paper_seen = 0
+                    continue
+
+                daily_profit_points += trade["profit_points"]
+                trade["daily_profit_points"] = daily_profit_points
+                trade["daily_profit_bricks"] = daily_profit_points / range_size
+                trade["is_campaign_complete"] = daily_profit_points >= target_points
+                trades.append(trade)
+
+                if trade["profit_points"] < 0:
+                    consecutive_losses += 1
+                elif trade["profit_points"] > 0:
+                    consecutive_losses = 0
+
+                if (
+                    daily_profit_points < target_points and
+                    consecutive_losses >= variant["loss_threshold"]
+                ):
+                    in_quarantine = True
+                    total_quarantine_entries += 1
+                    day_quarantine_entries += 1
+                    paper_wins = 0
+                    paper_seen = 0
+
+            daily_reports.append({
+                "date": date,
+                "net_profit_bricks": daily_profit_points / range_size,
+                "result": "Win" if daily_profit_points >= target_points else "Loss/Flat",
+                "success_time": trades[-1]["exit_time"] if daily_profit_points >= target_points and trades else None,
+                "trades_count": len(trades),
+                "trades": trades,
+                "paper_trades": paper_trades,
+                "skipped_trades": skipped_trades,
+                "quarantine_entries": day_quarantine_entries,
+            })
+
+        result = summarize_campaign(daily_reports, 1.0, f"mes_reg5_quarantine:{variant['name']}")
+        result["name"] = variant["name"]
+        result["variant"] = variant
+        result["summary"]["total_paper_trades"] = total_paper_trades
+        result["summary"]["total_quarantine_entries"] = total_quarantine_entries
+        result["summary"]["avoided_loss_bricks"] = avoided_loss_points / range_size
+        result["summary"]["missed_profit_bricks"] = missed_profit_points / range_size
+        return result
+
+    baseline = run_mes_reg5_daily_recovery_campaign(data, signal_details, config)
+    results = [run_variant(variant) for variant in variants]
+    ranked = sorted(
+        results,
+        key=lambda result: (
+            result["summary"].get("winning_days", 0),
+            result["summary"].get("net_profit_bricks", 0.0),
+            -abs(result["summary"].get("max_drawdown_bricks", 0.0)),
+            -result["summary"].get("total_trades", 0),
+        ),
+        reverse=True,
+    )
+
+    return {
+        "objective": "Test paper-trade quarantine rules after consecutive real losses in the MES Reg5 Daily Recovery campaign.",
+        "baseline_summary": baseline.get("summary", {}),
+        "variants": results,
+        "ranked": [
+            {
+                "name": result["name"],
+                "variant": result["variant"],
+                "summary": result["summary"],
+            }
+            for result in ranked
+        ],
+    }
 
 def run_yellow_momentum_campaign(data, signal_details, config):
     campaign_name = "Yellow Momentum 1:1"
@@ -3380,6 +3831,7 @@ if __name__ == "__main__":
     parser.add_argument("--json", action="store_true", help="Output results in JSON format")
     parser.add_argument("--optimize", action="store_true", help="Run parameter optimization sweep")
     parser.add_argument("--optimize-yellow-momentum", action="store_true", help="Run Yellow Momentum 1:1 parameter optimization sweep")
+    parser.add_argument("--experiment-mes-reg5-quarantine", action="store_true", help="Run MES Reg5 paper-trade quarantine experiments")
     
     args = parser.parse_args()
  
@@ -3441,6 +3893,8 @@ if __name__ == "__main__":
     if args.yellow_max_reversals is not None:
         config["yellow_momentum_max_reversals"] = args.yellow_max_reversals
 
+    config["chart_name"] = args.chart
+
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     chart_path = os.path.join(project_dir, "data", f"{args.chart}.json")
     annotations_path = os.path.join(project_dir, "data", "annotations.json")
@@ -3474,6 +3928,15 @@ if __name__ == "__main__":
         mes_mes3_trend_tail_details = []  # wait, not needed, keep it clean
         mes_reg5_long_tail_details, mes_reg5_long_tail_evaluations = run_mes_reg5_long_tail_strategy(data, config)
         mes_reg5_ema_bounce_arity_details, mes_reg5_ema_bounce_arity_evaluations = run_mes_reg5_ema_bounce_arity_strategy(data, config)
+        if args.experiment_mes_reg5_quarantine:
+            experiment_results = run_mes_reg5_quarantine_experiments(
+                data,
+                mes_reg5_ema_bounce_arity_details,
+                config,
+            )
+            print(json.dumps(experiment_results, indent=2))
+            import sys
+            sys.exit(0)
         matches, false_negatives, false_positives = analyze_alignment(signals, annotations, data)
         campaign_results = run_daily_campaign(data, signal_details, config, exit_strategy=args.exit_strategy)
         ema_bounce_campaign_results = run_ema_bounce_campaign(data, signal_set_2_details, config)

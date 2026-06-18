@@ -1028,6 +1028,29 @@ export default function App() {
             comment: `${selectedCampaign.label} skipped fast-market signal #${idx + 1}`,
           });
         });
+        day.paper_trades?.forEach((trade, idx) => {
+          if (selectedCampaign.resultKey !== 'mes_reg5_daily_recovery_campaign_results') return;
+          merged.push({
+            timestamp: trade.entry_time,
+            barIndex: trade.entry_barIndex,
+            action: trade.direction,
+            isMesReg5RecoveryPaperEntry: true,
+            tradeIndex: idx + 1,
+            comment: `${selectedCampaign.label} paper entry #${idx + 1}`,
+          });
+
+          merged.push({
+            timestamp: trade.exit_time,
+            barIndex: trade.exit_barIndex,
+            action: trade.direction,
+            direction: trade.direction,
+            isMesReg5RecoveryPaperExit: true,
+            exitResult: trade.result,
+            profitBricks: trade.profit_bricks,
+            tradeIndex: idx + 1,
+            comment: `${selectedCampaign.label} paper exit #${idx + 1} (${trade.result})`,
+          });
+        });
       });
     }
     
@@ -2109,17 +2132,19 @@ export default function App() {
                 <span className="stat-value">{selectedBrick.close.toFixed(2)}</span>
               </div>
               <div className="stat-item">
-                <span className="stat-label">5 EMA</span>
+                <span className="stat-label">{activeChart?.includes('8pt') ? '9 EMA' : '5 EMA'}</span>
                 <span className="stat-value" style={{ color: 'var(--primary)' }}>
                   {(selectedBrick.ema5 ?? selectedBrick.ema) ? (selectedBrick.ema5 ?? selectedBrick.ema).toFixed(4) : 'N/A'}
                 </span>
               </div>
-              <div className="stat-item">
-                <span className="stat-label">10 EMA</span>
-                <span className="stat-value" style={{ color: '#008000' }}>
-                  {selectedBrick.ema10 ? selectedBrick.ema10.toFixed(4) : 'N/A'}
-                </span>
-              </div>
+              {selectedBrick.ema10 !== undefined && selectedBrick.ema10 !== null && (
+                <div className="stat-item">
+                  <span className="stat-label">10 EMA</span>
+                  <span className="stat-value" style={{ color: '#008000' }}>
+                    {selectedBrick.ema10.toFixed(4)}
+                  </span>
+                </div>
+              )}
             </div>
 
             <div>

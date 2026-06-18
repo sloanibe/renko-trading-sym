@@ -1000,6 +1000,48 @@
       }
     },
     {
+      "timestamp": "2026-05-28T06:35:00",
+      "barIndex": 45028,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "This was a really strong cell signal that was missed and would have completed this day early.",
+      "metrics": {
+        "open": 7530.25,
+        "high": 7530.5,
+        "low": 7529.25,
+        "close": 7529.25,
+        "ema": 7529.9941
+      }
+    },
+    {
+      "timestamp": "2026-05-28T06:50:35",
+      "barIndex": 45082,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "This bar should not have been marked as an entry because there are full body bars to the left of it, meaning a congested market.",
+      "metrics": {
+        "open": 7532.25,
+        "high": 7533,
+        "low": 7531.75,
+        "close": 7533,
+        "ema": 7532.0867
+      }
+    },
+    {
+      "timestamp": "2026-05-28T07:12:54",
+      "barIndex": 45178,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Here is a very nice EMA bounce that was not caught.",
+      "metrics": {
+        "open": 7543.75,
+        "high": 7545,
+        "low": 7543.75,
+        "close": 7545,
+        "ema": 7543.475
+      }
+    },
+    {
       "timestamp": "2026-06-17T06:30:24",
       "barIndex": 113434,
       "action": "Skip",
