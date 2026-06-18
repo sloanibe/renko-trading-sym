@@ -63,6 +63,72 @@ const findBarIndexForDate = (data, dateStr) => {
   return -1;
 };
 
+const getNavigationTree = (formattedData) => {
+  if (!formattedData || !formattedData.length) return [];
+  
+  const monthsMap = new Map();
+  
+  for (let i = 0; i < formattedData.length; i++) {
+    const bar = formattedData[i];
+    const isoTime = bar.originalTime || bar.time;
+    if (typeof isoTime !== 'string') continue;
+    
+    const parts = isoTime.split('T');
+    if (parts.length < 1) continue;
+    const datePart = parts[0];
+    const dateSubparts = datePart.split('-');
+    if (dateSubparts.length < 3) continue;
+    
+    const year = dateSubparts[0];
+    const month = dateSubparts[1];
+    const day = dateSubparts[2];
+    
+    const monthKey = `${year}-${month}`;
+    
+    if (!monthsMap.has(monthKey)) {
+      monthsMap.set(monthKey, {
+        key: monthKey,
+        year,
+        month,
+        days: new Map()
+      });
+    }
+    
+    const monthObj = monthsMap.get(monthKey);
+    if (!monthObj.days.has(datePart)) {
+      const dateObj = new Date(`${datePart}T00:00:00Z`);
+      const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+      const weekday = weekdayNames[dateObj.getUTCDay()];
+      
+      monthObj.days.set(datePart, {
+        dateStr: datePart,
+        day,
+        weekday,
+        firstIndex: i
+      });
+    }
+  }
+  
+  const MONTH_NAMES = {
+    '01': 'Jan', '02': 'Feb', '03': 'Mar', '04': 'Apr', '05': 'May', '06': 'Jun',
+    '07': 'Jul', '08': 'Aug', '09': 'Sep', '10': 'Oct', '11': 'Nov', '12': 'Dec'
+  };
+  
+  return [...monthsMap.values()]
+    .sort((a, b) => a.key.localeCompare(b.key))
+    .map(m => ({
+      key: m.key,
+      label: `${MONTH_NAMES[m.month] || m.month} ${m.year}`,
+      days: [...m.days.values()]
+        .sort((a, b) => a.dateStr.localeCompare(b.dateStr))
+        .map(d => ({
+          ...d,
+          label: `${parseInt(d.day, 10)} ${d.weekday}`
+        }))
+    }));
+};
+
+
 
 const getSessionOpenIndices = (data) => {
   const firstBarByDate = new Map();
@@ -782,6 +848,31 @@ export default function ChartComponent({
   const haSelectionHighlightRef = useRef(null);
   const [jumpDateInput, setJumpDateInput] = useState('');
   const [jumpError, setJumpError] = useState('');
+  const [selectedMonthKey, setSelectedMonthKey] = useState(null);
+  const [isDaySelectorOpen, setIsDaySelectorOpen] = useState(false);
+
+  const { formattedData, originalTimeByChartTime, barIndexByChartTime } = React.useMemo(
+    () => formatChartData(data),
+    [data]
+  );
+
+  const navigationTree = React.useMemo(() => {
+    return getNavigationTree(formattedData);
+  }, [formattedData]);
+
+  useEffect(() => {
+    if (!isDaySelectorOpen) return;
+    
+    const handleOutsideClick = (e) => {
+      if (!e.target.closest('.day-selector-popover') && !e.target.closest('.control-btn')) {
+        setSelectedMonthKey(null);
+        setIsDaySelectorOpen(false);
+      }
+    };
+    
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, [isDaySelectorOpen]);
 
   const hasSecondaryPane = secondaryData && secondaryData.length > 0 && showSecondaryPane;
   hasSecondaryPaneRef.current = hasSecondaryPane;
@@ -1325,7 +1416,6 @@ export default function ChartComponent({
 
     // Lightweight Charts requires unique ascending times. Keep those internal
     // chart keys separate from the original MultiCharts completion timestamps.
-    const { formattedData, originalTimeByChartTime, barIndexByChartTime } = formatChartData(data);
     primaryFormattedDataRef.current = formattedData;
     primaryBarByChartTimeRef.current = new Map(formattedData.map(item => [item.time, item]));
 
@@ -1670,7 +1760,7 @@ export default function ChartComponent({
       primaryFormattedDataRef.current = [];
       primaryBarByChartTimeRef.current = new Map();
     };
-  }, [data]);
+  }, [data, formattedData, originalTimeByChartTime]);
 
   useEffect(() => {
     if (!secondaryChartContainerRef.current || !secondaryData || secondaryData.length === 0 || !hasSecondaryPane) {
@@ -2350,36 +2440,133 @@ export default function ChartComponent({
             End
           </span>
         </div>
-        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-          <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)' }}>Go to Date:</span>
-          <input
-            type="text"
-            placeholder="e.g. 5/27 or 2026-05-27"
-            value={jumpDateInput}
-            onChange={(e) => setJumpDateInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleJumpToDate();
-            }}
-            style={{
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-color)',
-              borderRadius: '4px',
-              padding: '2px 8px',
-              fontSize: '11px',
-              color: 'var(--text-main)',
-              width: '140px',
-              height: '22px',
-              outline: 'none',
-            }}
-          />
-          <button
-            onClick={handleJumpToDate}
-            className="control-btn"
-            style={{ padding: '2px 8px', height: '22px', fontSize: '11px' }}
-          >
-            Go
-          </button>
-          {jumpError && <span style={{ fontSize: '11px', color: '#f43f5e', marginLeft: '6px' }}>{jumpError}</span>}
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', marginBottom: '8px', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)' }}>Go to Date:</span>
+            <input
+              type="text"
+              placeholder="e.g. 5/27 or 2026-05-27"
+              value={jumpDateInput}
+              onChange={(e) => setJumpDateInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleJumpToDate();
+              }}
+              style={{
+                background: 'rgba(255, 255, 255, 0.05)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '4px',
+                padding: '2px 8px',
+                fontSize: '11px',
+                color: 'var(--text-main)',
+                width: '140px',
+                height: '22px',
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={handleJumpToDate}
+              className="control-btn"
+              style={{ padding: '2px 8px', height: '22px', fontSize: '11px' }}
+            >
+              Go
+            </button>
+            {jumpError && <span style={{ fontSize: '11px', color: '#f43f5e', marginLeft: '6px' }}>{jumpError}</span>}
+          </div>
+
+          {navigationTree.length > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)' }}>Quick Jump:</span>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                {navigationTree.map((month) => {
+                  const isSelected = selectedMonthKey === month.key;
+                  return (
+                    <div key={month.key} style={{ position: 'relative' }}>
+                      <button
+                        onClick={() => {
+                          if (selectedMonthKey === month.key) {
+                            setSelectedMonthKey(null);
+                            setIsDaySelectorOpen(false);
+                          } else {
+                            setSelectedMonthKey(month.key);
+                            setIsDaySelectorOpen(true);
+                          }
+                        }}
+                        className={`control-btn ${isSelected ? 'active' : ''}`}
+                        style={{
+                          padding: '2px 8px',
+                          height: '22px',
+                          fontSize: '11px',
+                          borderColor: isSelected ? 'var(--primary)' : 'var(--border-color)',
+                          background: isSelected ? 'rgba(0, 229, 255, 0.15)' : 'rgba(255, 255, 255, 0.03)',
+                          color: isSelected ? 'var(--primary)' : 'var(--text-secondary)',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {month.label} ▾
+                      </button>
+                      {isSelected && isDaySelectorOpen && (
+                        <div
+                          className="day-selector-popover"
+                          style={{
+                            position: 'absolute',
+                            bottom: '28px',
+                            left: '50%',
+                            transform: 'translateX(-50%)',
+                            zIndex: 100,
+                            background: '#12161e',
+                            border: '1px solid var(--primary)',
+                            borderRadius: '6px',
+                            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), 0 0 8px var(--primary-glow)',
+                            padding: '6px',
+                            width: '210px',
+                            maxHeight: '180px',
+                            overflowY: 'auto',
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(3, 1fr)',
+                            gap: '4px',
+                          }}
+                        >
+                          {month.days.map((day) => (
+                            <button
+                              key={day.dateStr}
+                              onClick={() => {
+                                goToBarIndex(day.firstIndex);
+                                setSelectedMonthKey(null);
+                                setIsDaySelectorOpen(false);
+                              }}
+                              style={{
+                                background: 'rgba(255, 255, 255, 0.04)',
+                                border: '1px solid rgba(255, 255, 255, 0.08)',
+                                borderRadius: '4px',
+                                padding: '4px 2px',
+                                fontSize: '10px',
+                                color: 'var(--text-main)',
+                                cursor: 'pointer',
+                                textAlign: 'center',
+                                transition: 'all 0.15s ease',
+                              }}
+                              onMouseEnter={(e) => {
+                                e.target.style.background = 'var(--primary)';
+                                e.target.style.color = '#0c0e12';
+                                e.target.style.borderColor = 'var(--primary)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.target.style.background = 'rgba(255, 255, 255, 0.04)';
+                                e.target.style.color = 'var(--text-main)';
+                                e.target.style.borderColor = 'rgba(255, 255, 255, 0.08)';
+                              }}
+                            >
+                              {day.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
