@@ -25,6 +25,45 @@ const formatTimeLabel = (isoString) => {
   }
 };
 
+const findBarIndexForDate = (data, dateStr) => {
+  if (!dateStr || !data?.length) return -1;
+  const normalized = dateStr.trim().replace(/\//g, '-'); // "5/27" -> "5-27"
+  
+  for (let i = 0; i < data.length; i++) {
+    const isoTime = data[i].originalTime || '';
+    const datePart = isoTime.split('T')[0]; // "2026-05-27"
+    
+    if (datePart === normalized) return i;
+    if (datePart.endsWith(normalized)) {
+      const idx = datePart.indexOf(normalized);
+      if (idx === 0 || datePart[idx - 1] === '-') {
+        return i;
+      }
+    }
+    
+    // Support non-padded matching
+    const [y, m, d] = datePart.split('-');
+    const splitNorm = normalized.split('-');
+    if (splitNorm.length === 2) {
+      const [nm, nd] = splitNorm;
+      if (parseInt(m, 10) === parseInt(nm, 10) && parseInt(d, 10) === parseInt(nd, 10)) {
+        return i;
+      }
+    } else if (splitNorm.length === 3) {
+      const [ny, nm, nd] = splitNorm;
+      if (
+        parseInt(y, 10) === parseInt(ny, 10) &&
+        parseInt(m, 10) === parseInt(nm, 10) &&
+        parseInt(d, 10) === parseInt(nd, 10)
+      ) {
+        return i;
+      }
+    }
+  }
+  return -1;
+};
+
+
 const getSessionOpenIndices = (data) => {
   const firstBarByDate = new Map();
   data.forEach((bar, index) => {
@@ -741,6 +780,8 @@ export default function ChartComponent({
   const [haSelectionMode, setHaSelectionMode] = useState(false);
   const [haSelection, setHaSelection] = useState(null);
   const haSelectionHighlightRef = useRef(null);
+  const [jumpDateInput, setJumpDateInput] = useState('');
+  const [jumpError, setJumpError] = useState('');
 
   const hasSecondaryPane = secondaryData && secondaryData.length > 0 && showSecondaryPane;
   hasSecondaryPaneRef.current = hasSecondaryPane;
@@ -759,6 +800,19 @@ export default function ChartComponent({
         from: start,
         to: start + width,
       });
+    }
+  };
+
+  const handleJumpToDate = () => {
+    setJumpError('');
+    if (!jumpDateInput.trim()) return;
+
+    const index = findBarIndexForDate(formattedData, jumpDateInput);
+    if (index !== -1) {
+      goToBarIndex(index);
+    } else {
+      setJumpError('Date not found');
+      setTimeout(() => setJumpError(''), 3000);
     }
   };
 
@@ -2295,6 +2349,37 @@ export default function ChartComponent({
           >
             End
           </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+          <span style={{ fontSize: '11px', fontWeight: '600', color: 'var(--text-secondary)' }}>Go to Date:</span>
+          <input
+            type="text"
+            placeholder="e.g. 5/27 or 2026-05-27"
+            value={jumpDateInput}
+            onChange={(e) => setJumpDateInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleJumpToDate();
+            }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid var(--border-color)',
+              borderRadius: '4px',
+              padding: '2px 8px',
+              fontSize: '11px',
+              color: 'var(--text-main)',
+              width: '140px',
+              height: '22px',
+              outline: 'none',
+            }}
+          />
+          <button
+            onClick={handleJumpToDate}
+            className="control-btn"
+            style={{ padding: '2px 8px', height: '22px', fontSize: '11px' }}
+          >
+            Go
+          </button>
+          {jumpError && <span style={{ fontSize: '11px', color: '#f43f5e', marginLeft: '6px' }}>{jumpError}</span>}
         </div>
         <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
