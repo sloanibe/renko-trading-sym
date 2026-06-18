@@ -1015,6 +1015,19 @@ export default function App() {
             comment: `${selectedCampaign.label} exit #${idx + 1} (${trade.result})`,
           });
         });
+        day.skipped_trades?.forEach((skipped, idx) => {
+          if (skipped.reason !== 'FastMarket') return;
+          merged.push({
+            timestamp: skipped.time,
+            barIndex: skipped.barIndex,
+            action: skipped.direction,
+            isMesReg5RecoveryCampaignSkip: selectedCampaign.resultKey === 'mes_reg5_daily_recovery_campaign_results',
+            skipReason: skipped.reason,
+            secondsSincePreviousBar: skipped.seconds_since_previous_bar,
+            tradeIndex: idx + 1,
+            comment: `${selectedCampaign.label} skipped fast-market signal #${idx + 1}`,
+          });
+        });
       });
     }
     

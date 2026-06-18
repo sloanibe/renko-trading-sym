@@ -818,7 +818,22 @@ class CampaignExitMarkerRenderer {
         ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
 
         ctx.fillStyle = textColor;
-        ctx.fillText(marker.text, x, boxCenterY + 0.5 * vRatio);
+        if (marker.tradeProfitText && marker.dailyProfitText) {
+          ctx.font = `800 ${11 * vRatio}px Inter, system-ui, sans-serif`;
+          ctx.fillText(marker.tradeProfitText, x, boxCenterY - 7 * vRatio);
+          
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = 0.5 * Math.min(hRatio, vRatio);
+          ctx.beginPath();
+          ctx.moveTo(boxLeft + 4 * hRatio, boxCenterY);
+          ctx.lineTo(boxLeft + boxWidth - 4 * hRatio, boxCenterY);
+          ctx.stroke();
+          
+          ctx.fillText(marker.dailyProfitText, x, boxCenterY + 7 * vRatio);
+        } else {
+          ctx.font = `800 ${13 * vRatio}px Inter, system-ui, sans-serif`;
+          ctx.fillText(marker.text, x, boxCenterY + 0.5 * vRatio);
+        }
       });
     });
   }
@@ -1625,8 +1640,8 @@ export default function ChartComponent({
       boxColor: '#00d5ff',
       strokeColor: '#050505',
       textColor: '#050505',
-      boxWidth: 46,
-      boxHeight: 25,
+      boxWidth: 48,
+      boxHeight: 34,
       boxGap: 30,
       pointerGap: 4,
     });
@@ -2113,16 +2128,31 @@ export default function ChartComponent({
               size: 3,
               text: '',
             });
+          } else if (ann.isMesReg5RecoveryCampaignSkip) {
+            markers.push({
+              time: chartTime,
+              position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
+              color: '#ff2bd6',
+              shape: 'circle',
+              size: 2,
+              text: 'FAST',
+            });
           } else if (ann.isMesReg5RecoveryCampaignExit) {
             const dailyProfit = Number(ann.dailyProfitBricks);
+            const tradeProfit = Number(ann.profitBricks);
             const dailyProfitText = Number.isFinite(dailyProfit)
               ? `${dailyProfit >= 0 ? '+' : ''}${dailyProfit.toFixed(1)}`
+              : '';
+            const tradeProfitText = Number.isFinite(tradeProfit)
+              ? `${tradeProfit >= 0 ? '+' : ''}${tradeProfit.toFixed(1)}`
               : '';
             campaignExitMarkers.push({
               time: chartTime,
               barIndex: ann.barIndex,
               direction: ann.direction,
               text: dailyProfitText,
+              dailyProfitText,
+              tradeProfitText,
             });
           } else if (ann.isCampaignEntry) {
             markers.push({

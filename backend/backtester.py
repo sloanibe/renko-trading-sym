@@ -2272,6 +2272,7 @@ def summarize_campaign(daily_reports, target_bricks, exit_strategy):
     winning_days = len([day for day in daily_reports if day["net_profit_bricks"] > 0])
     losing_days = len([day for day in daily_reports if day["net_profit_bricks"] <= 0])
     total_trades = sum(day["trades_count"] for day in daily_reports)
+    total_skipped_trades = sum(len(day.get("skipped_trades", [])) for day in daily_reports)
     net_profit = sum(day["net_profit_bricks"] for day in daily_reports)
     winning_trades = 0
     losing_trades = 0
@@ -2299,6 +2300,7 @@ def summarize_campaign(daily_reports, target_bricks, exit_strategy):
             "losing_days": losing_days,
             "win_rate": (winning_days / total_days * 100) if total_days else 0.0,
             "total_trades": total_trades,
+            "total_skipped_trades": total_skipped_trades,
             "winning_trades": winning_trades,
             "losing_trades": losing_trades,
             "breakeven_trades": breakeven_trades,
@@ -2520,6 +2522,7 @@ def write_mes_reg5_daily_recovery_report(report):
         f"- Losing/flat days: {summary.get('losing_days', 0)}",
         f"- Day win rate: {summary.get('win_rate', 0.0):.1f}%",
         f"- Total trades: {summary.get('total_trades', 0)}",
+        f"- Fast-market skipped signals: {summary.get('total_skipped_trades', 0)}",
         f"- Net result: {summary.get('net_profit_bricks', 0.0):.1f} bars / {summary.get('net_profit_bricks', 0.0) * range_size / tick_size:.0f} ticks",
         f"- Max campaign drawdown: {summary.get('max_drawdown_bricks', 0.0):.1f} bars / {summary.get('max_drawdown_bricks', 0.0) * range_size / tick_size:.0f} ticks",
         "",
@@ -2527,7 +2530,7 @@ def write_mes_reg5_daily_recovery_report(report):
         "",
     ]
 
-    for key in ["entry", "target", "warmup", "first_trade", "recovery", "session"]:
+    for key in ["entry", "target", "warmup", "fast_market_skip", "first_trade", "recovery", "session"]:
         if key in rules:
             lines.append(f"- {key.replace('_', ' ').title()}: {rules[key]}")
 
@@ -2535,16 +2538,17 @@ def write_mes_reg5_daily_recovery_report(report):
         "",
         "## Daily Breakdown",
         "",
-        "| Date | Result | Trades | Net Bars | Net Ticks | First Entry | Done Time |",
-        "|---|---:|---:|---:|---:|---|---|",
+        "| Date | Result | Trades | Fast Skips | Net Bars | Net Ticks | First Entry | Done Time |",
+        "|---|---:|---:|---:|---:|---:|---|---|",
     ])
 
     for day in report.get("daily_reports", []):
         done_time = time_only(day.get("success_time"))
         first_entry = time_only(day["trades"][0]["entry_time"]) if day.get("trades") else ""
         net_ticks = day.get("net_profit_bricks", 0.0) * range_size / tick_size if tick_size else 0.0
+        fast_skips = len(day.get("skipped_trades", []))
         lines.append(
-            f"| {day['date']} | {day['result']} | {day['trades_count']} | "
+            f"| {day['date']} | {day['result']} | {day['trades_count']} | {fast_skips} | "
             f"{day.get('net_profit_bricks', 0.0):.1f} | {net_ticks:.0f} | {first_entry} | {done_time} |"
         )
 
@@ -2562,6 +2566,20 @@ def write_mes_reg5_daily_recovery_report(report):
                 f"{time_only(trade['exit_time'])} | {trade['exit_price']:.2f} | {trade['result']} | "
                 f"{ticks(trade.get('profit_points', 0.0)):.0f} | {ticks(trade.get('daily_profit_points', 0.0)):.0f} |"
             )
+        skipped_trades = day.get("skipped_trades", [])
+        if skipped_trades:
+            lines.extend([
+                "",
+                "Skipped fast-market signals:",
+                "",
+                "| # | Direction | Time | Seconds Since Previous Bar | Reason |",
+                "|---:|---|---|---:|---|",
+            ])
+            for index, skipped in enumerate(skipped_trades, 1):
+                lines.append(
+                    f"| {index} | {skipped['direction']} | {time_only(skipped['time'])} | "
+                    f"{skipped.get('seconds_since_previous_bar', 0.0):.1f} | {skipped.get('reason', '')} |"
+                )
         lines.append("")
 
     project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -2580,6 +2598,7 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
     target_points = range_size
     first_stop_points = tick_size * 10
     warmup_bars = 10
+    min_manual_signal_seconds = 3.0
 
     def bar_direction(bar):
         if bar["close"] > bar["open"]:
@@ -2591,6 +2610,16 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
     def in_session(timestamp):
         time = timestamp.split("T")[1].replace("Z", "")
         return start_time <= time <= end_time
+
+    def seconds_from_previous_bar(index):
+        if index <= 0:
+            return None
+        try:
+            current_time = datetime.fromisoformat(data[index]["time"].replace("Z", "+00:00"))
+            previous_time = datetime.fromisoformat(data[index - 1]["time"].replace("Z", "+00:00"))
+        except (KeyError, ValueError):
+            return None
+        return (current_time - previous_time).total_seconds()
 
     date_to_bar_indices = {}
     for index, bar in enumerate(data):
@@ -2618,6 +2647,7 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
         )
         daily_profit_points = 0.0
         trades = []
+        skipped_trades = []
         next_eligible_entry_index = -1
 
         for signal in day_signals:
@@ -2632,6 +2662,21 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
 
             entry_bar = data[entry_index]
             if not in_session(entry_bar["time"]):
+                continue
+
+            seconds_since_previous = seconds_from_previous_bar(entry_index)
+            if (
+                seconds_since_previous is not None and
+                seconds_since_previous < min_manual_signal_seconds
+            ):
+                skipped_trades.append({
+                    "campaign": campaign_name,
+                    "time": entry_bar["time"],
+                    "barIndex": entry_index,
+                    "direction": signal["action"],
+                    "reason": "FastMarket",
+                    "seconds_since_previous_bar": seconds_since_previous,
+                })
                 continue
 
             direction = signal["action"]
@@ -2734,7 +2779,7 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
             "success_time": trades[-1]["exit_time"] if daily_profit_points >= target_points and trades else None,
             "trades_count": len(trades),
             "trades": trades,
-            "skipped_trades": [],
+            "skipped_trades": skipped_trades,
         })
 
     result = summarize_campaign(daily_reports, 1.0, "mes_reg5_daily_recovery")
@@ -2743,6 +2788,7 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
         "entry": "Close of MES Reg5 EMA Bounce Arity arrow bar",
         "target": "Stop for the day at +1 bar (+5 ticks)",
         "warmup": "Ignore signals until at least 10 session bars have formed",
+        "fast_market_skip": "Skip otherwise eligible signals when the signal bar forms less than 3 seconds after the previous bar",
         "first_trade": "First trade wins at +5 ticks or loses at -10 ticks",
         "recovery": "After a first loss, recovery trades hold until daily P/L reaches +5 ticks, a -10 tick trade stop is hit, or an opposite-color close appears while the trade is already profitable",
         "session": f"{start_time} to {end_time}",
