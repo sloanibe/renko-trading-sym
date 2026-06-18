@@ -67,6 +67,7 @@ const getNavigationTree = (formattedData) => {
   if (!formattedData || !formattedData.length) return [];
   
   const monthsMap = new Map();
+  const daysMap = new Map();
   
   for (let i = 0; i < formattedData.length; i++) {
     const bar = formattedData[i];
@@ -74,8 +75,9 @@ const getNavigationTree = (formattedData) => {
     if (typeof isoTime !== 'string') continue;
     
     const parts = isoTime.split('T');
-    if (parts.length < 1) continue;
     const datePart = parts[0];
+    const timePart = parts.length >= 2 ? parts[1].replace('Z', '') : '';
+    
     const dateSubparts = datePart.split('-');
     if (dateSubparts.length < 3) continue;
     
@@ -95,6 +97,19 @@ const getNavigationTree = (formattedData) => {
     }
     
     const monthObj = monthsMap.get(monthKey);
+    
+    if (!daysMap.has(datePart)) {
+      daysMap.set(datePart, {
+        firstIndex: i,
+        sessionIndex: undefined
+      });
+    }
+    
+    const dayCand = daysMap.get(datePart);
+    if (dayCand.sessionIndex === undefined && timePart >= SESSION_OPEN_TIME) {
+      dayCand.sessionIndex = i;
+    }
+    
     if (!monthObj.days.has(datePart)) {
       const dateObj = new Date(`${datePart}T00:00:00Z`);
       const weekdayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -106,6 +121,16 @@ const getNavigationTree = (formattedData) => {
         weekday,
         firstIndex: i
       });
+    }
+  }
+  
+  // Patch firstIndex to RTH session open if available
+  for (const monthObj of monthsMap.values()) {
+    for (const [dateStr, dayObj] of monthObj.days.entries()) {
+      const cand = daysMap.get(dateStr);
+      if (cand) {
+        dayObj.firstIndex = cand.sessionIndex !== undefined ? cand.sessionIndex : cand.firstIndex;
+      }
     }
   }
   
@@ -127,6 +152,7 @@ const getNavigationTree = (formattedData) => {
         }))
     }));
 };
+
 
 
 
