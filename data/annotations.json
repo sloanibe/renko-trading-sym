@@ -930,6 +930,76 @@
   ],
   "MESM_reg_5": [
     {
+      "timestamp": "2026-05-07T06:34:49",
+      "barIndex": 653,
+      "action": "Sell",
+      "markerSet": "Training Set",
+      "comment": "You missed this very nice arid bounce off the EMA.",
+      "metrics": {
+        "open": 7394.75,
+        "high": 7395,
+        "low": 7393.75,
+        "close": 7393.75,
+        "ema": 7394.8744
+      }
+    },
+    {
+      "timestamp": "2026-05-07T06:36:36",
+      "barIndex": 659,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "This was not a great trade as it was not aired. There were a couple of solid bars right in front of it.",
+      "metrics": {
+        "open": 7392.5,
+        "high": 7392.75,
+        "low": 7391.5,
+        "close": 7391.5,
+        "ema": 7392.6968
+      }
+    },
+    {
+      "timestamp": "2026-05-07T06:56:30",
+      "barIndex": 741,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "This was not a good trade to take because there was too much clumping right before, not arid enough.",
+      "metrics": {
+        "open": 7390.5,
+        "high": 7390.75,
+        "low": 7389.5,
+        "close": 7390.75,
+        "ema": 7389.3665
+      }
+    },
+    {
+      "timestamp": "2026-05-07T06:59:31",
+      "barIndex": 751,
+      "action": "Skip",
+      "markerSet": "Training Set",
+      "comment": "This was not close enough to the EMA.",
+      "metrics": {
+        "open": 7387,
+        "high": 7387.25,
+        "low": 7386,
+        "close": 7386,
+        "ema": 7387.491
+      }
+    },
+    {
+      "timestamp": "2026-05-27T07:02:26",
+      "barIndex": 42970,
+      "action": "Buy",
+      "markerSet": "Training Set",
+      "comment": "Pin Bar in an Extremely Strong Trend",
+      "metrics": {
+        "open": 7543.5,
+        "high": 7543.75,
+        "low": 7542.5,
+        "close": 7543.75,
+        "ema": 7541.0702
+      }
+    },
+    {
       "timestamp": "2026-06-17T06:30:24",
       "barIndex": 113434,
       "action": "Skip",

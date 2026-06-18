@@ -85,12 +85,12 @@ DEFAULT_CONFIG = {
     "mes_reg5_long_tail_min_close_distance": 1.0,
     "mes_reg5_long_tail_cooldown_bars": 3,
     "mes_reg5_ema_bounce_arity_slope_period": 8,
-    "mes_reg5_ema_bounce_arity_slope_threshold": 0.15,
+    "mes_reg5_ema_bounce_arity_slope_threshold": 0.22,
     "mes_reg5_ema_bounce_arity_short_slope_period": 4,
-    "mes_reg5_ema_bounce_arity_short_slope_threshold": 0.28,
-    "mes_reg5_ema_bounce_arity_relaxed_short_slope_threshold": 0.18,
-    "mes_reg5_ema_bounce_arity_strong_short_slope_threshold": 0.30,
-    "mes_reg5_ema_bounce_arity_strong_slope_threshold": 0.22,
+    "mes_reg5_ema_bounce_arity_short_slope_threshold": 0.36,
+    "mes_reg5_ema_bounce_arity_relaxed_short_slope_threshold": 0.25,
+    "mes_reg5_ema_bounce_arity_strong_short_slope_threshold": 0.38,
+    "mes_reg5_ema_bounce_arity_strong_slope_threshold": 0.28,
     "mes_reg5_ema_bounce_arity_extended_short_slope_threshold": 0.36,
     "mes_reg5_ema_bounce_arity_lookback": 8,
     "mes_reg5_ema_bounce_arity_base_max_reversals": 3,
@@ -98,10 +98,18 @@ DEFAULT_CONFIG = {
     "mes_reg5_ema_bounce_arity_base_max_overlap": 0.68,
     "mes_reg5_ema_bounce_arity_strong_max_overlap": 0.86,
     "mes_reg5_ema_bounce_arity_buy_low_to_ema_max": 0.25,
-    "mes_reg5_ema_bounce_arity_sell_high_to_ema_min": -0.50,
+    "mes_reg5_ema_bounce_arity_sell_high_to_ema_min": 0.00,
     "mes_reg5_ema_bounce_arity_extended_buy_low_to_ema_max": 0.65,
-    "mes_reg5_ema_bounce_arity_extended_sell_high_to_ema_min": -0.75,
+    "mes_reg5_ema_bounce_arity_extended_sell_high_to_ema_min": 0.00,
     "mes_reg5_ema_bounce_arity_extended_min_tail": 0.75,
+    "mes_reg5_ema_bounce_arity_pin_short_slope_threshold": 0.70,
+    "mes_reg5_ema_bounce_arity_pin_slope_threshold": 0.55,
+    "mes_reg5_ema_bounce_arity_pin_min_tail": 1.00,
+    "mes_reg5_ema_bounce_arity_pin_min_ema_distance": 1.00,
+    "mes_reg5_ema_bounce_arity_pin_max_ema_distance": 1.60,
+    "mes_reg5_ema_bounce_arity_pin_max_overlap": 0.50,
+    "mes_reg5_ema_bounce_arity_pin_max_reversals": 2,
+    "mes_reg5_ema_bounce_arity_max_chase_distance": 1.25,
     "mes_reg5_ema_bounce_arity_min_close_dist_buy": 0.40,
     "mes_reg5_ema_bounce_arity_min_close_dist_sell": 0.75,
     "mes_reg5_ema_bounce_arity_cooldown_bars": 2,
@@ -742,6 +750,14 @@ def run_mes_reg5_ema_bounce_arity_strategy(data, config):
     extended_buy_low_to_ema_max = config.get("mes_reg5_ema_bounce_arity_extended_buy_low_to_ema_max", buy_low_to_ema_max)
     extended_sell_high_to_ema_min = config.get("mes_reg5_ema_bounce_arity_extended_sell_high_to_ema_min", sell_high_to_ema_min)
     extended_min_tail = config.get("mes_reg5_ema_bounce_arity_extended_min_tail", 0.75)
+    pin_short_slope_threshold = config.get("mes_reg5_ema_bounce_arity_pin_short_slope_threshold", 0.70)
+    pin_slope_threshold = config.get("mes_reg5_ema_bounce_arity_pin_slope_threshold", 0.55)
+    pin_min_tail = config.get("mes_reg5_ema_bounce_arity_pin_min_tail", 1.00)
+    pin_min_ema_distance = config.get("mes_reg5_ema_bounce_arity_pin_min_ema_distance", 1.00)
+    pin_max_ema_distance = config.get("mes_reg5_ema_bounce_arity_pin_max_ema_distance", 1.60)
+    pin_max_overlap = config.get("mes_reg5_ema_bounce_arity_pin_max_overlap", 0.50)
+    pin_max_reversals = config.get("mes_reg5_ema_bounce_arity_pin_max_reversals", 2)
+    max_chase_distance = config.get("mes_reg5_ema_bounce_arity_max_chase_distance", 1.25)
     min_close_dist_buy = config.get("mes_reg5_ema_bounce_arity_min_close_dist_buy", 0.50)
     min_close_dist_sell = config.get("mes_reg5_ema_bounce_arity_min_close_dist_sell", 1.00)
     cooldown_bars = max(0, config.get("mes_reg5_ema_bounce_arity_cooldown_bars", 3))
@@ -778,13 +794,23 @@ def run_mes_reg5_ema_bounce_arity_strategy(data, config):
             abs(short_ema_slope) >= strong_short_slope_threshold and
             abs(ema_slope) >= strong_slope_threshold
         )
-        max_reversals = strong_max_reversals if is_strong_trend else base_max_reversals
-        max_overlap = strong_max_overlap if is_strong_trend else base_max_overlap
 
-        if reversals > max_reversals or avg_overlap > max_overlap:
+        high_overlap_rejection_tail = (
+            lower_tail >= extended_min_tail
+            if short_ema_slope > 0
+            else upper_tail >= extended_min_tail
+        )
+        if reversals >= 5 and avg_overlap > 0.60:
+            continue
+        if reversals == 4 and avg_overlap > 0.70 and not (
+            is_strong_trend and high_overlap_rejection_tail and avg_overlap <= 0.90
+        ):
+            continue
+        if reversals <= 3 and avg_overlap > 0.98:
             continue
 
         action = None
+        setup_type = "mesReg5EmaBounceArity"
         buy_slope_ok = (
             short_ema_slope >= short_slope_threshold or
             (short_ema_slope >= relaxed_short_slope_threshold and ema_slope >= slope_threshold)
@@ -820,8 +846,36 @@ def run_mes_reg5_ema_bounce_arity_strategy(data, config):
             (sell_near_ema or sell_extended_tail)
         ):
             action = "Sell"
+        elif (
+            is_up and
+            short_ema_slope >= pin_short_slope_threshold and
+            ema_slope >= pin_slope_threshold and
+            lower_tail >= pin_min_tail and
+            pin_min_ema_distance <= low_to_ema <= pin_max_ema_distance and
+            avg_overlap <= pin_max_overlap and
+            reversals <= pin_max_reversals
+        ):
+            action = "Buy"
+            setup_type = "mesReg5StrongTrendPinBar"
+        elif (
+            is_down and
+            short_ema_slope <= -pin_short_slope_threshold and
+            ema_slope <= -pin_slope_threshold and
+            upper_tail >= pin_min_tail and
+            -pin_max_ema_distance <= high_to_ema <= -pin_min_ema_distance and
+            avg_overlap <= pin_max_overlap and
+            reversals <= pin_max_reversals
+        ):
+            action = "Sell"
+            setup_type = "mesReg5StrongTrendPinBar"
 
         if not action:
+            continue
+        if action == "Buy":
+            touched_ema = low_to_ema <= 0
+        else:
+            touched_ema = high_to_ema >= 0
+        if not touched_ema and abs(close_to_ema) > max_chase_distance:
             continue
 
         signal_details.append({
@@ -829,7 +883,7 @@ def run_mes_reg5_ema_bounce_arity_strategy(data, config):
             "timestamp": current["time"],
             "action": action,
             "metrics": {
-                "setupType": "mesReg5EmaBounceArity",
+                "setupType": setup_type,
                 "ema": ema,
                 "emaSlope": ema_slope,
                 "shortEmaSlope": short_ema_slope,
@@ -842,6 +896,7 @@ def run_mes_reg5_ema_bounce_arity_strategy(data, config):
                 "upperTail": upper_tail,
                 "lowerTail": lower_tail,
                 "usedExtendedTail": buy_extended_tail if action == "Buy" else sell_extended_tail,
+                "usedPinBar": setup_type == "mesReg5StrongTrendPinBar",
             },
         })
         last_signal_index = i
@@ -2439,6 +2494,83 @@ def run_ema_bounce_campaign(data, signal_details, config):
     }
     return result
 
+def write_mes_reg5_daily_recovery_report(report):
+    rules = report.get("rules", {})
+    summary = report.get("summary", {})
+    tick_size = rules.get("tick_size", 0.25)
+    range_size = rules.get("range_size", tick_size * 5)
+
+    def ticks(points):
+        return points / tick_size if tick_size else 0.0
+
+    def time_only(timestamp):
+        return timestamp.split("T")[1].replace("Z", "") if timestamp else ""
+
+    lines = [
+        "# MES Reg5 Daily Recovery Campaign Report",
+        "",
+        f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "## Summary",
+        "",
+        f"- Campaign: {report.get('name', 'MES Reg5 Daily Recovery')}",
+        f"- Session: {rules.get('session', 'N/A')}",
+        f"- Days traded: {summary.get('total_days', 0)}",
+        f"- Winning days: {summary.get('winning_days', 0)}",
+        f"- Losing/flat days: {summary.get('losing_days', 0)}",
+        f"- Day win rate: {summary.get('win_rate', 0.0):.1f}%",
+        f"- Total trades: {summary.get('total_trades', 0)}",
+        f"- Net result: {summary.get('net_profit_bricks', 0.0):.1f} bars / {summary.get('net_profit_bricks', 0.0) * range_size / tick_size:.0f} ticks",
+        f"- Max campaign drawdown: {summary.get('max_drawdown_bricks', 0.0):.1f} bars / {summary.get('max_drawdown_bricks', 0.0) * range_size / tick_size:.0f} ticks",
+        "",
+        "## Rules Used",
+        "",
+    ]
+
+    for key in ["entry", "target", "warmup", "first_trade", "recovery", "session"]:
+        if key in rules:
+            lines.append(f"- {key.replace('_', ' ').title()}: {rules[key]}")
+
+    lines.extend([
+        "",
+        "## Daily Breakdown",
+        "",
+        "| Date | Result | Trades | Net Bars | Net Ticks | First Entry | Done Time |",
+        "|---|---:|---:|---:|---:|---|---|",
+    ])
+
+    for day in report.get("daily_reports", []):
+        done_time = time_only(day.get("success_time"))
+        first_entry = time_only(day["trades"][0]["entry_time"]) if day.get("trades") else ""
+        net_ticks = day.get("net_profit_bricks", 0.0) * range_size / tick_size if tick_size else 0.0
+        lines.append(
+            f"| {day['date']} | {day['result']} | {day['trades_count']} | "
+            f"{day.get('net_profit_bricks', 0.0):.1f} | {net_ticks:.0f} | {first_entry} | {done_time} |"
+        )
+
+    lines.extend(["", "## Trade Details", ""])
+    for day in report.get("daily_reports", []):
+        lines.extend([
+            f"### {day['date']} - {day['result']} ({day['trades_count']} trades, {day.get('net_profit_bricks', 0.0):.1f} bars)",
+            "",
+            "| # | Direction | Entry | Entry Price | Exit | Exit Price | Result | P/L Ticks | Daily Cum Ticks |",
+            "|---:|---|---|---:|---|---:|---|---:|---:|",
+        ])
+        for index, trade in enumerate(day.get("trades", []), 1):
+            lines.append(
+                f"| {index} | {trade['direction']} | {time_only(trade['entry_time'])} | {trade['entry_price']:.2f} | "
+                f"{time_only(trade['exit_time'])} | {trade['exit_price']:.2f} | {trade['result']} | "
+                f"{ticks(trade.get('profit_points', 0.0)):.0f} | {ticks(trade.get('daily_profit_points', 0.0)):.0f} |"
+            )
+        lines.append("")
+
+    project_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = os.path.join(project_dir, "scratch")
+    os.makedirs(output_dir, exist_ok=True)
+    output_path = os.path.join(output_dir, "mes-reg5-daily-recovery-report.md")
+    with open(output_path, "w") as report_file:
+        report_file.write("\n".join(lines) + "\n")
+
 def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
     campaign_name = "MES Reg5 Daily Recovery"
     start_time = "06:30:00"
@@ -2447,6 +2579,7 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
     range_size = tick_size * 5
     target_points = range_size
     first_stop_points = tick_size * 10
+    warmup_bars = 10
 
     def bar_direction(bar):
         if bar["close"] > bar["open"]:
@@ -2473,14 +2606,30 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
     daily_reports = []
     for date in sorted(date_to_signals):
         day_signals = sorted(date_to_signals[date], key=lambda signal: signal["barIndex"])
+        session_bar_indices = [
+            index
+            for index in date_to_bar_indices.get(date, [])
+            if in_session(data[index]["time"])
+        ]
+        first_eligible_entry_index = (
+            session_bar_indices[warmup_bars]
+            if len(session_bar_indices) > warmup_bars
+            else 999999999
+        )
         daily_profit_points = 0.0
         trades = []
+        next_eligible_entry_index = -1
 
         for signal in day_signals:
             if daily_profit_points >= target_points:
                 break
 
             entry_index = signal["barIndex"]
+            if entry_index < first_eligible_entry_index:
+                continue
+            if entry_index <= next_eligible_entry_index:
+                continue
+
             entry_bar = data[entry_index]
             if not in_session(entry_bar["time"]):
                 continue
@@ -2515,7 +2664,6 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
                     if direction == "Buy"
                     else bar["high"] - entry_price
                 )
-
                 if first_trade:
                     hit_target = favorable_points >= target_points
                     hit_stop = adverse_points >= first_stop_points
@@ -2538,13 +2686,21 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
                         profit_points = remaining_target_points
                         result = "RecoveryTarget"
                         break
+                    if adverse_points >= first_stop_points:
+                        exit_index = index
+                        exit_price = entry_price - direction_multiplier * first_stop_points
+                        profit_points = -first_stop_points
+                        result = "RecoveryStop"
+                        break
                     current_direction = bar_direction(bar)
                     if current_direction != "Flat" and current_direction != direction:
-                        exit_index = index
-                        exit_price = bar["close"]
-                        profit_points = (exit_price - entry_price) * direction_multiplier
-                        result = "OppositeClose"
-                        break
+                        current_profit_points = (bar["close"] - entry_price) * direction_multiplier
+                        if current_profit_points > 0:
+                            exit_index = index
+                            exit_price = bar["close"]
+                            profit_points = current_profit_points
+                            result = "OppositeClose"
+                            break
 
             if exit_index is None:
                 exit_index = entry_index
@@ -2567,7 +2723,9 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
                 "profit_bricks": profit_points / range_size,
                 "daily_profit_points": daily_profit_points,
                 "daily_profit_bricks": daily_profit_points / range_size,
+                "is_campaign_complete": daily_profit_points >= target_points,
             })
+            next_eligible_entry_index = exit_index
 
         daily_reports.append({
             "date": date,
@@ -2584,12 +2742,14 @@ def run_mes_reg5_daily_recovery_campaign(data, signal_details, config):
     result["rules"] = {
         "entry": "Close of MES Reg5 EMA Bounce Arity arrow bar",
         "target": "Stop for the day at +1 bar (+5 ticks)",
+        "warmup": "Ignore signals until at least 10 session bars have formed",
         "first_trade": "First trade wins at +5 ticks or loses at -10 ticks",
-        "recovery": "After a first loss, keep trading until daily P/L reaches +5 ticks; otherwise exit recovery trades on opposite-color close",
+        "recovery": "After a first loss, recovery trades hold until daily P/L reaches +5 ticks, a -10 tick trade stop is hit, or an opposite-color close appears while the trade is already profitable",
         "session": f"{start_time} to {end_time}",
         "range_size": range_size,
         "tick_size": tick_size,
     }
+    write_mes_reg5_daily_recovery_report(result)
     return result
 
 def run_yellow_momentum_campaign(data, signal_details, config):

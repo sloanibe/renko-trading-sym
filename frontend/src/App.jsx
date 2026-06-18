@@ -992,27 +992,29 @@ export default function App() {
       const reports = backtestResults?.[selectedCampaign.resultKey]?.daily_reports;
       reports?.forEach(day => {
         day.trades?.forEach((trade, idx) => {
-        merged.push({
-          timestamp: trade.entry_time,
-          barIndex: trade.entry_barIndex,
-          action: trade.direction,
-          [selectedCampaign.entryFlag]: true,
-          tradeIndex: idx + 1,
-          comment: `${selectedCampaign.label} entry #${idx + 1}`,
-        });
+          merged.push({
+            timestamp: trade.entry_time,
+            barIndex: trade.entry_barIndex,
+            action: trade.direction,
+            [selectedCampaign.entryFlag]: true,
+            tradeIndex: idx + 1,
+            comment: `${selectedCampaign.label} entry #${idx + 1}`,
+          });
 
-        merged.push({
-          timestamp: trade.exit_time,
-          barIndex: trade.exit_barIndex,
-          action: trade.direction,
-          direction: trade.direction,
-          [selectedCampaign.exitFlag]: true,
-          exitResult: trade.result,
-          profitBricks: trade.profit_bricks,
-          tradeIndex: idx + 1,
-          comment: `${selectedCampaign.label} exit #${idx + 1} (${trade.result})`,
+          merged.push({
+            timestamp: trade.exit_time,
+            barIndex: trade.exit_barIndex,
+            action: trade.direction,
+            direction: trade.direction,
+            [selectedCampaign.exitFlag]: true,
+            isCampaignComplete: trade.is_campaign_complete,
+            exitResult: trade.result,
+            profitBricks: trade.profit_bricks,
+            dailyProfitBricks: trade.daily_profit_bricks,
+            tradeIndex: idx + 1,
+            comment: `${selectedCampaign.label} exit #${idx + 1} (${trade.result})`,
+          });
         });
-      });
       });
     }
     

@@ -544,6 +544,155 @@ class SessionDividerRenderer {
   }
 }
 
+class CampaignExitMarkerPrimitive {
+  constructor(data, markers = [], options = {}) {
+    this._data = data;
+    this._markers = markers;
+    this._options = options;
+    this._chart = null;
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  attached(param) {
+    this._chart = param.chart;
+    this._series = param.series;
+    this._requestUpdate = param.requestUpdate;
+  }
+
+  detached() {
+    this._chart = null;
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  updateData(data) {
+    this._data = data;
+    if (this._requestUpdate) this._requestUpdate();
+  }
+
+  updateMarkers(markers) {
+    this._markers = markers || [];
+    if (this._requestUpdate) this._requestUpdate();
+  }
+
+  paneViews() {
+    return [new CampaignExitMarkerPaneView(this)];
+  }
+}
+
+class CampaignExitMarkerPaneView {
+  constructor(primitive) {
+    this._primitive = primitive;
+  }
+
+  zOrder() {
+    return 'top';
+  }
+
+  renderer() {
+    return new CampaignExitMarkerRenderer(this._primitive);
+  }
+}
+
+class CampaignExitMarkerRenderer {
+  constructor(primitive) {
+    this._primitive = primitive;
+  }
+
+  draw(target) {
+    const chart = this._primitive._chart;
+    const series = this._primitive._series;
+    const data = this._primitive._data;
+    const markers = this._primitive._markers;
+    const options = this._primitive._options;
+    if (!chart || !series || !data?.length || !markers?.length) return;
+
+    const dataByTime = new Map(data.map(bar => [bar.time, bar]));
+    const visibleRange = chart.timeScale().getVisibleLogicalRange();
+    const firstVisibleIndex = visibleRange
+      ? Math.max(0, Math.floor(visibleRange.from) - 2)
+      : 0;
+    const lastVisibleIndex = visibleRange
+      ? Math.min(data.length - 1, Math.ceil(visibleRange.to) + 2)
+      : data.length - 1;
+
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context;
+      const hRatio = scope.horizontalPixelRatio;
+      const vRatio = scope.verticalPixelRatio;
+      const boxColor = options.boxColor || '#00d5ff';
+      const strokeColor = options.strokeColor || '#050505';
+      const textColor = options.textColor || '#050505';
+      const boxWidth = (options.boxWidth || 44) * hRatio;
+      const boxHeight = (options.boxHeight || 24) * vRatio;
+      const pointerGap = (options.pointerGap || 10) * vRatio;
+      const boxGap = (options.boxGap || 28) * vRatio;
+      const arrowSize = (options.arrowSize || 6) * Math.min(hRatio, vRatio);
+
+      ctx.font = `800 ${13 * vRatio}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      markers.forEach((marker) => {
+        if (marker.barIndex < firstVisibleIndex || marker.barIndex > lastVisibleIndex) return;
+
+        const bar = dataByTime.get(marker.time) || data[marker.barIndex];
+        if (!bar) return;
+
+        const xCoordinate = chart.timeScale().timeToCoordinate(bar.time);
+        const highY = series.priceToCoordinate(bar.high);
+        const lowY = series.priceToCoordinate(bar.low);
+        if (xCoordinate === null || highY === null || lowY === null) return;
+
+        const isBuyExit = marker.direction === 'Buy';
+        const x = xCoordinate * hRatio;
+        const anchorY = (isBuyExit ? highY : lowY) * vRatio;
+        const boxCenterY = isBuyExit
+          ? anchorY - boxGap - boxHeight / 2
+          : anchorY + boxGap + boxHeight / 2;
+        const boxLeft = x - boxWidth / 2;
+        const boxTop = boxCenterY - boxHeight / 2;
+        const pointerEndY = isBuyExit
+          ? boxTop + boxHeight + pointerGap
+          : boxTop - pointerGap;
+
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2 * Math.min(hRatio, vRatio);
+        ctx.beginPath();
+        ctx.moveTo(x, anchorY);
+        ctx.lineTo(x, pointerEndY);
+        ctx.stroke();
+
+        ctx.fillStyle = strokeColor;
+        ctx.beginPath();
+        if (isBuyExit) {
+          ctx.moveTo(x, anchorY);
+          ctx.lineTo(x - arrowSize, anchorY - arrowSize * 1.4);
+          ctx.lineTo(x + arrowSize, anchorY - arrowSize * 1.4);
+        } else {
+          ctx.moveTo(x, anchorY);
+          ctx.lineTo(x - arrowSize, anchorY + arrowSize * 1.4);
+          ctx.lineTo(x + arrowSize, anchorY + arrowSize * 1.4);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = boxColor;
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 2 * Math.min(hRatio, vRatio);
+        ctx.fillRect(boxLeft, boxTop, boxWidth, boxHeight);
+        ctx.strokeRect(boxLeft, boxTop, boxWidth, boxHeight);
+
+        ctx.fillStyle = textColor;
+        ctx.fillText(marker.text, x, boxCenterY + 0.5 * vRatio);
+      });
+    });
+  }
+}
+
 
 export default function ChartComponent({
   data,
@@ -570,6 +719,7 @@ export default function ChartComponent({
   const secondaryMa1SeriesRef = useRef(null);
   const secondaryMa2SeriesRef = useRef(null);
   const renkoOverlayRef = useRef(null);
+  const campaignExitMarkerRef = useRef(null);
   const markersPluginRef = useRef(null);
   const sliderRef = useRef(null);
   const sliderStartTextRef = useRef(null);
@@ -1301,6 +1451,17 @@ export default function ChartComponent({
       color: '#363636',
       lineWidth: 2,
     }));
+    const campaignExitMarker = new CampaignExitMarkerPrimitive(formattedData, [], {
+      boxColor: '#00d5ff',
+      strokeColor: '#050505',
+      textColor: '#050505',
+      boxWidth: 46,
+      boxHeight: 25,
+      boxGap: 30,
+      pointerGap: 4,
+    });
+    candlestickSeries.attachPrimitive(campaignExitMarker);
+    campaignExitMarkerRef.current = campaignExitMarker;
 
     // Populate EMA Series
     const ema5Data = formattedData
@@ -1451,6 +1612,7 @@ export default function ChartComponent({
       chart.remove();
       markersPluginRef.current = null;
       renkoOverlayRef.current = null;
+      campaignExitMarkerRef.current = null;
       primaryFormattedDataRef.current = [];
       primaryBarByChartTimeRef.current = new Map();
     };
@@ -1733,6 +1895,7 @@ export default function ChartComponent({
 
     // Build Chart Markers
     const markers = [];
+    const campaignExitMarkers = [];
     if (annotations && annotations.length > 0) {
       annotations.forEach(ann => {
         const chartTime = resolveAnnotationTime(ann);
@@ -1781,14 +1944,15 @@ export default function ChartComponent({
               text: '',
             });
           } else if (ann.isMesReg5RecoveryCampaignExit) {
-            const profit = Number(ann.profitBricks);
-            markers.push({
+            const dailyProfit = Number(ann.dailyProfitBricks);
+            const dailyProfitText = Number.isFinite(dailyProfit)
+              ? `${dailyProfit >= 0 ? '+' : ''}${dailyProfit.toFixed(1)}`
+              : '';
+            campaignExitMarkers.push({
               time: chartTime,
-              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar',
-              color: Number.isFinite(profit) && profit >= 0 ? '#f59e0b' : '#f43f5e',
-              shape: 'square',
-              size: 3,
-              text: Number.isFinite(profit) && profit >= 0 ? 'DONE' : 'EXIT',
+              barIndex: ann.barIndex,
+              direction: ann.direction,
+              text: dailyProfitText,
             });
           } else if (ann.isCampaignEntry) {
             markers.push({
@@ -1995,6 +2159,8 @@ export default function ChartComponent({
       }
       return m;
     });
+
+    campaignExitMarkerRef.current?.updateMarkers(campaignExitMarkers);
 
     if (!markersPluginRef.current) {
       markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, finalMarkers);
