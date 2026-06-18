@@ -339,7 +339,7 @@ export default function App() {
   }, [activeChart]);
 
   useEffect(() => {
-    if (activeChart === 'MESM_reg_5' && campaignView !== 'mesReg5Recovery') {
+    if (['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && campaignView !== 'mesReg5Recovery') {
       setCampaignView('mesReg5Recovery');
     }
   }, [activeChart, campaignView]);
@@ -954,7 +954,7 @@ export default function App() {
       });
     }
 
-    if (showMesReg5LongTailSignals && activeChart === 'MESM_reg_5' && backtestResults?.mes_reg5_long_tail_details) {
+    if (showMesReg5LongTailSignals && ['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && backtestResults?.mes_reg5_long_tail_details) {
       backtestResults.mes_reg5_long_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
         merged.push({
           timestamp,
@@ -970,7 +970,7 @@ export default function App() {
       });
     }
 
-    if (showMesReg5EmaBounceAritySignals && activeChart === 'MESM_reg_5' && backtestResults?.mes_reg5_ema_bounce_arity_details) {
+    if (showMesReg5EmaBounceAritySignals && ['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && backtestResults?.mes_reg5_ema_bounce_arity_details) {
       backtestResults.mes_reg5_ema_bounce_arity_details.forEach(({ barIndex, timestamp, action, metrics }) => {
         merged.push({
           timestamp,
@@ -1666,7 +1666,7 @@ export default function App() {
                         />
                         HA 10 EMA Reclaim Tail Setup ({backtestResults?.mes3_ha_ema_approach_details?.length || 0})
                       </label>
-                      {activeChart === 'MESM_reg_5' && (
+                      {['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && (
                         <>
                           <label htmlFor="showMesReg5LongTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
                             <input
@@ -2132,7 +2132,7 @@ export default function App() {
                 <span className="stat-value">{selectedBrick.close.toFixed(2)}</span>
               </div>
               <div className="stat-item">
-                <span className="stat-label">{activeChart?.includes('8pt') ? '9 EMA' : '5 EMA'}</span>
+                <span className="stat-label">{activeChart?.includes('8pt') || activeChart?.includes('3pt') ? '9 EMA' : '5 EMA'}</span>
                 <span className="stat-value" style={{ color: 'var(--primary)' }}>
                   {(selectedBrick.ema5 ?? selectedBrick.ema) ? (selectedBrick.ema5 ?? selectedBrick.ema).toFixed(4) : 'N/A'}
                 </span>

@@ -2322,14 +2322,24 @@ def infer_price_increment(data):
     return min(increments) if increments else 1.0
 
 def infer_range_size(data):
-    ranges = sorted(
-        bar["high"] - bar["low"]
-        for bar in data
-        if bar["high"] > bar["low"]
-    )
-    if not ranges:
-        return 1.0
-    return ranges[len(ranges) // 2]
+    range_counts = {}
+    for bar in data:
+        range_size = bar["high"] - bar["low"]
+        if range_size <= 0:
+            continue
+        key = round(range_size, 10)
+        range_counts[key] = range_counts.get(key, 0) + 1
+    if range_counts:
+        return max(range_counts.items(), key=lambda item: item[1])[0]
+
+    body_counts = {}
+    for bar in data:
+        body_size = abs(bar["close"] - bar["open"])
+        if body_size <= 0:
+            continue
+        key = round(body_size, 10)
+        body_counts[key] = body_counts.get(key, 0) + 1
+    return max(body_counts.items(), key=lambda item: item[1])[0] if body_counts else 1.0
 
 def summarize_campaign(daily_reports, target_bricks, exit_strategy):
     total_days = len(daily_reports)
