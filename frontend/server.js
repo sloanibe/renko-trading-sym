@@ -54,6 +54,63 @@ app.get('/api/charts/:name', (req, res) => {
   }
 });
 
+// Endpoint: Delete a chart dataset (and its annotations)
+app.delete('/api/charts/:name', (req, res) => {
+  try {
+    const chartName = req.params.name;
+    const reserved = new Set(['annotations', 'ai_selection']);
+    if (
+      !chartName ||
+      reserved.has(chartName) ||
+      chartName.includes('..') ||
+      chartName.includes('/') ||
+      chartName.includes('\\')
+    ) {
+      return res.status(400).json({ error: 'Invalid chart name' });
+    }
+
+    const fileName = `${chartName}.json`;
+    const filePath = path.join(DATA_DIR, fileName);
+    if (path.dirname(filePath) !== DATA_DIR) {
+      return res.status(400).json({ error: 'Invalid chart path' });
+    }
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Chart data not found' });
+    }
+
+    fs.unlinkSync(filePath);
+
+    // Remove annotations for this chart if present
+    if (fs.existsSync(ANNOTATIONS_PATH)) {
+      try {
+        const allAnnotations = JSON.parse(fs.readFileSync(ANNOTATIONS_PATH, 'utf-8') || '{}');
+        if (Object.prototype.hasOwnProperty.call(allAnnotations, chartName)) {
+          delete allAnnotations[chartName];
+          fs.writeFileSync(ANNOTATIONS_PATH, JSON.stringify(allAnnotations, null, 2), 'utf-8');
+        }
+      } catch (annotationError) {
+        console.error('Failed to clean annotations after chart delete:', annotationError);
+      }
+    }
+
+    // Clear AI selection if it pointed at this chart
+    if (fs.existsSync(AI_SELECTION_PATH)) {
+      try {
+        const selection = JSON.parse(fs.readFileSync(AI_SELECTION_PATH, 'utf-8'));
+        if (selection?.chart === chartName) {
+          fs.unlinkSync(AI_SELECTION_PATH);
+        }
+      } catch (selectionError) {
+        console.error('Failed to clean AI selection after chart delete:', selectionError);
+      }
+    }
+
+    res.json({ success: true, message: `Deleted dataset ${chartName}` });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete chart data', details: error.message });
+  }
+});
+
 // Endpoint: Get all annotations
 app.get('/api/annotations', (req, res) => {
   try {
@@ -160,74 +217,11 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     if (req.query.wickBodyOffset !== undefined) {
       cmd += ` --wick-body-offset ${parseInt(req.query.wickBodyOffset, 10)}`;
     }
-    if (req.query.exitStrategy) {
-      cmd += ` --exit-strategy ${req.query.exitStrategy}`;
-    }
     if (req.query.startTime) {
       cmd += ` --start-time ${req.query.startTime}`;
     }
     if (req.query.endTime) {
       cmd += ` --end-time ${req.query.endTime}`;
-    }
-    if (req.query.aridLookback !== undefined) {
-      cmd += ` --arid-lookback ${parseInt(req.query.aridLookback, 10)}`;
-    }
-    if (req.query.aridMaxOverlap !== undefined) {
-      cmd += ` --arid-max-overlap ${parseFloat(req.query.aridMaxOverlap)}`;
-    }
-    if (req.query.aridMaxReversals !== undefined) {
-      cmd += ` --arid-max-reversals ${parseInt(req.query.aridMaxReversals, 10)}`;
-    }
-    if (req.query.aridSlopeThreshold !== undefined) {
-      cmd += ` --arid-slope-threshold ${parseFloat(req.query.aridSlopeThreshold)}`;
-    }
-    if (req.query.aridMinGap !== undefined) {
-      cmd += ` --arid-min-gap ${parseFloat(req.query.aridMinGap)}`;
-    }
-    if (req.query.bounceType && ['all', 'yellow', 'green'].includes(req.query.bounceType)) {
-      cmd += ` --bounce-type ${req.query.bounceType}`;
-    }
-    if (req.query.set3LeftLookback !== undefined) {
-      cmd += ` --set3-left-lookback ${parseInt(req.query.set3LeftLookback, 10)}`;
-    }
-    if (req.query.set3MaxLeftOverlaps !== undefined) {
-      cmd += ` --set3-max-left-overlaps ${parseInt(req.query.set3MaxLeftOverlaps, 10)}`;
-    }
-    if (req.query.set3SlopeThreshold !== undefined) {
-      cmd += ` --set3-slope-threshold ${parseFloat(req.query.set3SlopeThreshold)}`;
-    }
-    if (req.query.set3MinGap !== undefined) {
-      cmd += ` --set3-min-gap ${parseFloat(req.query.set3MinGap)}`;
-    }
-    if (req.query.set3SyntheticMinGap !== undefined) {
-      cmd += ` --set3-synthetic-min-gap ${parseFloat(req.query.set3SyntheticMinGap)}`;
-    }
-    if (req.query.yellowSlopePeriod !== undefined) {
-      cmd += ` --yellow-slope-period ${parseInt(req.query.yellowSlopePeriod, 10)}`;
-    }
-    if (req.query.yellowFastSlope !== undefined) {
-      cmd += ` --yellow-fast-slope ${parseFloat(req.query.yellowFastSlope)}`;
-    }
-    if (req.query.yellowSlowSlope !== undefined) {
-      cmd += ` --yellow-slow-slope ${parseFloat(req.query.yellowSlowSlope)}`;
-    }
-    if (req.query.yellowMinGap !== undefined) {
-      cmd += ` --yellow-min-gap ${parseFloat(req.query.yellowMinGap)}`;
-    }
-    if (req.query.yellowMinPenetration !== undefined) {
-      cmd += ` --yellow-min-penetration ${parseFloat(req.query.yellowMinPenetration)}`;
-    }
-    if (req.query.yellowMinTail !== undefined) {
-      cmd += ` --yellow-min-tail ${parseFloat(req.query.yellowMinTail)}`;
-    }
-    if (req.query.yellowArityLookback !== undefined) {
-      cmd += ` --yellow-arity-lookback ${parseInt(req.query.yellowArityLookback, 10)}`;
-    }
-    if (req.query.yellowMaxOverlap !== undefined) {
-      cmd += ` --yellow-max-overlap ${parseFloat(req.query.yellowMaxOverlap)}`;
-    }
-    if (req.query.yellowMaxReversals !== undefined) {
-      cmd += ` --yellow-max-reversals ${parseInt(req.query.yellowMaxReversals, 10)}`;
     }
     exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
       if (error) {
@@ -244,37 +238,6 @@ app.get('/api/charts/:name/backtest', (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ error: 'Server error during backtest initiation', details: error.message });
-  }
-});
-
-// Endpoint: Run Yellow Momentum 1:1 optimization
-app.get('/api/charts/:name/optimize-yellow-momentum', (req, res) => {
-  try {
-    const chartName = req.params.name;
-    const pythonScript = path.join(__dirname, '..', 'backend', 'backtester.py');
-    let cmd = `python3 "${pythonScript}" --chart "${chartName}" --optimize-yellow-momentum`;
-    if (req.query.startTime) {
-      cmd += ` --start-time ${req.query.startTime}`;
-    }
-    if (req.query.endTime) {
-      cmd += ` --end-time ${req.query.endTime}`;
-    }
-    
-    exec(cmd, { maxBuffer: 50 * 1024 * 1024 }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('Yellow Momentum optimizer error:', error, stderr);
-        return res.status(500).json({ error: 'Failed to run Yellow Momentum optimizer', details: stderr || error.message });
-      }
-      try {
-        const results = JSON.parse(stdout);
-        res.json(results);
-      } catch (parseError) {
-        console.error('Failed to parse Yellow Momentum optimizer JSON output:', stdout);
-        res.status(500).json({ error: 'Failed to parse Yellow Momentum optimizer output', details: parseError.message, stdout });
-      }
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Server error during Yellow Momentum optimization initiation', details: error.message });
   }
 });
 

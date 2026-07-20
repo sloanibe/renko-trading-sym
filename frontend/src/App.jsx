@@ -1,22 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import ChartComponent from './ChartComponent';
+import {
+  RANGE_LONG_TAILS_SET,
+  isProjectableSignalSet,
+  projectRangeLongTails,
+} from './projections/rangeLongTails';
 
 const API_BASE = 'http://localhost:5000/api';
 const ACTIVE_CHART_STORAGE_KEY = 'renko-active-chart';
 const RAW_RANGE_MARKER_SET = 'Raw Range Bar Set';
 const CAMPAIGN_OPTIONS = {
-  yellowMomentum: {
-    label: 'Yellow Momentum 1:1',
-    resultKey: 'yellow_momentum_campaign_results',
-    entryFlag: 'isYellowMomentumCampaignEntry',
-    exitFlag: 'isYellowMomentumCampaignExit',
-  },
-  emaBounce: {
-    label: 'Campaign EMA Bounce',
-    resultKey: 'ema_bounce_campaign_results',
-    entryFlag: 'isEmaBounceCampaignEntry',
-    exitFlag: 'isEmaBounceCampaignExit',
-  },
   mesReg5Recovery: {
     label: 'MES Reg5 Daily Recovery',
     resultKey: 'mes_reg5_daily_recovery_campaign_results',
@@ -30,8 +23,17 @@ const CAMPAIGN_OPTIONS = {
     exitFlag: 'isCampaignExit',
   },
 };
+const VALID_CAMPAIGN_VIEWS = new Set(Object.keys(CAMPAIGN_OPTIONS));
+const MES_REG5_CHARTS = ['MESM_reg_5', 'MES_8pt', 'MES_3pt'];
+const defaultCampaignView = (savedView, chartName) => {
+  if (MES_REG5_CHARTS.includes(chartName)) return 'mesReg5Recovery';
+  if (VALID_CAMPAIGN_VIEWS.has(savedView)) return savedView;
+  return 'dailyTarget';
+};
 const bookmarkStorageKey = chartName => `renko-bookmark:${chartName}`;
 const MARKER_SETTINGS_STORAGE_KEY = 'renko-marker-settings';
+const SIGNAL_SETS_STORAGE_KEY = 'renko-signal-sets';
+const LAST_SIGNAL_SET_STORAGE_KEY = 'renko-last-signal-set';
 const defaultMarkerSetForChart = chartName =>
   chartName?.includes('Range') || chartName === 'MES3' ? RAW_RANGE_MARKER_SET : 'Training Set';
 
@@ -39,6 +41,26 @@ const loadMarkerSettings = () => {
   if (typeof window === 'undefined') return {};
   try {
     return JSON.parse(localStorage.getItem(MARKER_SETTINGS_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
+};
+
+const loadCustomSignalSets = () => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(SIGNAL_SETS_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const loadLastSignalSets = () => {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LAST_SIGNAL_SET_STORAGE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
   } catch {
     return {};
   }
@@ -55,11 +77,13 @@ const metricsMatchBrick = (metrics, brick) => {
 const annotationMatchesBrick = (annotation, brick) => {
   if (!annotation || !brick) return false;
   if (Number.isInteger(annotation.barIndex) && Number.isInteger(brick.originalIndex)) {
-    return annotation.barIndex === brick.originalIndex;
+    if (annotation.barIndex === brick.originalIndex) return true;
   }
 
   const targetTime = brick.originalTime || brick.time;
-  return annotation.timestamp === targetTime && metricsMatchBrick(annotation.metrics, brick);
+  if (annotation.timestamp !== targetTime) return false;
+  if (!annotation.metrics) return true;
+  return metricsMatchBrick(annotation.metrics, brick);
 };
 
 export default function App() {
@@ -69,7 +93,7 @@ export default function App() {
   const isRegularCandlestick = activeChart?.toLowerCase().includes('reg');
   const [chartData, setChartData] = useState([]);
   const [secondaryChartData, setSecondaryChartData] = useState([]);
-  const [showSecondaryPane, setShowSecondaryPane] = useState(savedMarkerSettings.showSecondaryPane ?? true);
+  const [showSecondaryPane, setShowSecondaryPane] = useState(false);
   const [currentHaSelection, setCurrentHaSelection] = useState(null);
   const [allAnnotations, setAllAnnotations] = useState({});
   const [selectedBrick, setSelectedBrick] = useState(null);
@@ -79,191 +103,33 @@ export default function App() {
   const [bookmark, setBookmark] = useState(null);
   const [annotationsDrawerOpen, setAnnotationsDrawerOpen] = useState(false);
   const [datasetsDrawerOpen, setDatasetsDrawerOpen] = useState(false);
+  const [datasetContextMenu, setDatasetContextMenu] = useState(null);
 
-  // Strategy Configuration states
-  const [slopeThreshold, setSlopeThreshold] = useState(2.0);
-  const [minWick, setMinWick] = useState(5.0);
-  const [maxEmaDist, setMaxEmaDist] = useState(20.0);
-  const [retestTolerance, setRetestTolerance] = useState(2.0);
-  const [cooldownBars, setCooldownBars] = useState(0);
-  const [wickBodyOffset, setWickBodyOffset] = useState(0);
-  const [sessionStartTime, setSessionStartTime] = useState('06:31:00');
-  const [exitStrategy, setExitStrategy] = useState('fixed'); // 'fixed', 'trail', or 'stepup' (Fixed Target by default)
-  const [showTrainingAnnotations, setShowTrainingAnnotations] = useState(savedMarkerSettings.showTrainingAnnotations ?? false);
-  const [showRawSignals, setShowRawSignals] = useState(savedMarkerSettings.showRawSignals ?? false);
-  const [showSignalSet2, setShowSignalSet2] = useState(savedMarkerSettings.showSignalSet2 ?? true);
-  const [showSignalSet3, setShowSignalSet3] = useState(savedMarkerSettings.showSignalSet3 ?? true);
-  const [showMes3TrendTailSignals, setShowMes3TrendTailSignals] = useState(savedMarkerSettings.showMes3TrendTailSignals ?? false);
-  const [showMes3PreviousTailSignals, setShowMes3PreviousTailSignals] = useState(savedMarkerSettings.showMes3PreviousTailSignals ?? true);
-  const [showMes3HaEmaApproachSignals, setShowMes3HaEmaApproachSignals] = useState(savedMarkerSettings.showMes3HaEmaApproachSignals ?? true);
-  const [showMesReg5LongTailSignals, setShowMesReg5LongTailSignals] = useState(savedMarkerSettings.showMesReg5LongTailSignals ?? true);
-  const [showMesReg5EmaBounceAritySignals, setShowMesReg5EmaBounceAritySignals] = useState(savedMarkerSettings.showMesReg5EmaBounceAritySignals ?? true);
-  const [showCampaignTrades, setShowCampaignTrades] = useState(savedMarkerSettings.showCampaignTrades ?? true);
-  const [campaignView, setCampaignView] = useState(savedMarkerSettings.campaignView ?? 'yellowMomentum');
-  const [aridLookback, setAridLookback] = useState(8);
-  const [aridMaxOverlap, setAridMaxOverlap] = useState(0.95);
-  const [aridMaxReversals, setAridMaxReversals] = useState(5);
-  const [aridSlopeThreshold, setAridSlopeThreshold] = useState(10.0);
-  const [aridMinGap, setAridMinGap] = useState(0.5);
-  const [bounceType, setBounceType] = useState('green');
-  const [set3LeftLookback, setSet3LeftLookback] = useState(8);
-  const [set3MaxLeftOverlaps, setSet3MaxLeftOverlaps] = useState(1);
-  const [set3SlopeThreshold, setSet3SlopeThreshold] = useState(4.0);
-  const [set3MinGap, setSet3MinGap] = useState(0.5);
-  const [set3SyntheticMinGap, setSet3SyntheticMinGap] = useState(-0.25);
-  const [optimizing, setOptimizing] = useState(false);
-  const [optimizingYellowMomentum, setOptimizingYellowMomentum] = useState(false);
-  const [yellowOptimizationSummary, setYellowOptimizationSummary] = useState(null);
-  const [yellowSlopePeriod, setYellowSlopePeriod] = useState(8);
-  const [yellowFastSlope, setYellowFastSlope] = useState(30.0);
-  const [yellowSlowSlope, setYellowSlowSlope] = useState(25.0);
-  const [yellowMinGap, setYellowMinGap] = useState(4.0);
-  const [yellowMinPenetration, setYellowMinPenetration] = useState(1.5);
-  const [yellowMinTail, setYellowMinTail] = useState(1.0);
-  const [yellowArityLookback, setYellowArityLookback] = useState(8);
-  const [yellowMaxOverlap, setYellowMaxOverlap] = useState(0.95);
-  const [yellowMaxReversals, setYellowMaxReversals] = useState(5);
+  // Chart display controls
+  const [customSignalSetsByChart, setCustomSignalSetsByChart] = useState(loadCustomSignalSets);
+  const [lastSignalSetByChart, setLastSignalSetByChart] = useState(loadLastSignalSets);
+  const [creatingSignalSet, setCreatingSignalSet] = useState(false);
+  const [newSignalSetName, setNewSignalSetName] = useState('');
+  const [projectingSignalSets, setProjectingSignalSets] = useState(
+    savedMarkerSettings.projectingSignalSets || {}
+  );
+  const [activeProjection, setActiveProjection] = useState(null);
+  const [campaignView, setCampaignView] = useState(
+    defaultCampaignView(savedMarkerSettings.campaignView, localStorage.getItem(ACTIVE_CHART_STORAGE_KEY))
+  );
 
-  const fetchBacktest = async (chartName, configOverrides = {}) => {
+  const fetchBacktest = async (chartName) => {
     if (!chartName) return;
     setLoadingBacktest(true);
-    
-    // Prioritize overrides (passed during optimization/updates) over stale states
-    const slope = configOverrides.slopeThreshold !== undefined ? configOverrides.slopeThreshold : slopeThreshold;
-    const wick = configOverrides.minWick !== undefined ? configOverrides.minWick : minWick;
-    const dist = configOverrides.maxEmaDist !== undefined ? configOverrides.maxEmaDist : maxEmaDist;
-    const tol = configOverrides.retestTolerance !== undefined ? configOverrides.retestTolerance : retestTolerance;
-    const cooldownVal = configOverrides.cooldownBars !== undefined ? configOverrides.cooldownBars : cooldownBars;
-    const exitStrategyVal = configOverrides.exitStrategy !== undefined ? configOverrides.exitStrategy : exitStrategy;
-    const wickOffset = configOverrides.wickBodyOffset !== undefined ? configOverrides.wickBodyOffset : wickBodyOffset;
-    const startTime = configOverrides.sessionStartTime !== undefined ? configOverrides.sessionStartTime : sessionStartTime;
-    const yellowSlopePeriodVal = configOverrides.yellowSlopePeriod !== undefined ? configOverrides.yellowSlopePeriod : yellowSlopePeriod;
-    const yellowFastSlopeVal = configOverrides.yellowFastSlope !== undefined ? configOverrides.yellowFastSlope : yellowFastSlope;
-    const yellowSlowSlopeVal = configOverrides.yellowSlowSlope !== undefined ? configOverrides.yellowSlowSlope : yellowSlowSlope;
-    const yellowMinGapVal = configOverrides.yellowMinGap !== undefined ? configOverrides.yellowMinGap : yellowMinGap;
-    const yellowMinPenetrationVal = configOverrides.yellowMinPenetration !== undefined ? configOverrides.yellowMinPenetration : yellowMinPenetration;
-    const yellowMinTailVal = configOverrides.yellowMinTail !== undefined ? configOverrides.yellowMinTail : yellowMinTail;
-    const yellowArityLookbackVal = configOverrides.yellowArityLookback !== undefined ? configOverrides.yellowArityLookback : yellowArityLookback;
-    const yellowMaxOverlapVal = configOverrides.yellowMaxOverlap !== undefined ? configOverrides.yellowMaxOverlap : yellowMaxOverlap;
-    const yellowMaxReversalsVal = configOverrides.yellowMaxReversals !== undefined ? configOverrides.yellowMaxReversals : yellowMaxReversals;
 
     try {
-      const params = new URLSearchParams({
-        slopeThreshold: slope,
-        minWick: wick,
-        maxEmaDist: dist,
-        retestTolerance: tol,
-        cooldownBars: cooldownVal,
-        exitStrategy: exitStrategyVal,
-        wickBodyOffset: wickOffset,
-        startTime,
-        aridLookback,
-        aridMaxOverlap,
-        aridMaxReversals,
-        aridSlopeThreshold,
-        aridMinGap,
-        bounceType,
-        set3LeftLookback,
-        set3MaxLeftOverlaps,
-        set3SlopeThreshold,
-        set3MinGap,
-        set3SyntheticMinGap,
-        yellowSlopePeriod: yellowSlopePeriodVal,
-        yellowFastSlope: yellowFastSlopeVal,
-        yellowSlowSlope: yellowSlowSlopeVal,
-        yellowMinGap: yellowMinGapVal,
-        yellowMinPenetration: yellowMinPenetrationVal,
-        yellowMinTail: yellowMinTailVal,
-        yellowArityLookback: yellowArityLookbackVal,
-        yellowMaxOverlap: yellowMaxOverlapVal,
-        yellowMaxReversals: yellowMaxReversalsVal,
-      });
-      const query = `?${params.toString()}`;
-      const res = await fetch(`${API_BASE}/charts/${chartName}/backtest${query}`);
+      const res = await fetch(`${API_BASE}/charts/${chartName}/backtest`);
       const data = await res.json();
       setBacktestResults(data);
     } catch (err) {
       console.error('Failed to fetch backtest results:', err);
     } finally {
       setLoadingBacktest(false);
-    }
-  };
-
-  const handleOptimize = async () => {
-    if (!activeChart) return;
-    setOptimizing(true);
-    try {
-      const res = await fetch(`${API_BASE}/charts/${activeChart}/optimize`);
-      const bestConfig = await res.json();
-      if (bestConfig && !bestConfig.error) {
-        setSlopeThreshold(bestConfig.ema_slope_threshold);
-        setMinWick(bestConfig.min_wick_length);
-        setMaxEmaDist(bestConfig.max_ema_distance);
-        setRetestTolerance(bestConfig.wick_retest_tolerance);
-        
-        // Fetch backtest with the optimized config overrides immediately
-        fetchBacktest(activeChart, {
-          slopeThreshold: bestConfig.ema_slope_threshold,
-          minWick: bestConfig.min_wick_length,
-          maxEmaDist: bestConfig.max_ema_distance,
-          retestTolerance: bestConfig.wick_retest_tolerance
-        });
-      } else {
-        alert('Optimization failed: ' + (bestConfig.error || 'Unknown error'));
-      }
-    } catch (err) {
-      console.error('Failed to optimize parameters:', err);
-      alert('Failed to connect to the optimization engine.');
-    } finally {
-      setOptimizing(false);
-    }
-  };
-
-  const handleOptimizeYellowMomentum = async () => {
-    if (!activeChart) return;
-    setOptimizingYellowMomentum(true);
-    try {
-      const params = new URLSearchParams({
-        startTime: sessionStartTime,
-      });
-      const res = await fetch(`${API_BASE}/charts/${activeChart}/optimize-yellow-momentum?${params.toString()}`);
-      const optimization = await res.json();
-      if (!optimization || optimization.error) {
-        alert('Yellow Momentum optimization failed: ' + (optimization?.error || 'Unknown error'));
-        return;
-      }
-
-      const cfg = optimization.best_config || {};
-      const nextConfig = {
-        yellowSlopePeriod: cfg.yellow_momentum_slope_period ?? yellowSlopePeriod,
-        yellowFastSlope: cfg.yellow_momentum_fast_slope_threshold ?? yellowFastSlope,
-        yellowSlowSlope: cfg.yellow_momentum_slow_slope_threshold ?? yellowSlowSlope,
-        yellowMinGap: cfg.yellow_momentum_min_ema_gap ?? yellowMinGap,
-        yellowMinPenetration: cfg.yellow_momentum_min_penetration ?? yellowMinPenetration,
-        yellowMinTail: cfg.yellow_momentum_min_tail ?? yellowMinTail,
-        yellowArityLookback: cfg.yellow_momentum_arity_lookback ?? yellowArityLookback,
-        yellowMaxOverlap: cfg.yellow_momentum_max_overlap ?? yellowMaxOverlap,
-        yellowMaxReversals: cfg.yellow_momentum_max_reversals ?? yellowMaxReversals,
-      };
-
-      setYellowSlopePeriod(nextConfig.yellowSlopePeriod);
-      setYellowFastSlope(nextConfig.yellowFastSlope);
-      setYellowSlowSlope(nextConfig.yellowSlowSlope);
-      setYellowMinGap(nextConfig.yellowMinGap);
-      setYellowMinPenetration(nextConfig.yellowMinPenetration);
-      setYellowMinTail(nextConfig.yellowMinTail);
-      setYellowArityLookback(nextConfig.yellowArityLookback);
-      setYellowMaxOverlap(nextConfig.yellowMaxOverlap);
-      setYellowMaxReversals(nextConfig.yellowMaxReversals);
-      setYellowOptimizationSummary(optimization);
-      setCampaignView('yellowMomentum');
-      setShowCampaignTrades(true);
-      fetchBacktest(activeChart, nextConfig);
-    } catch (err) {
-      console.error('Failed to optimize Yellow Momentum parameters:', err);
-      alert('Failed to connect to the Yellow Momentum optimization engine.');
-    } finally {
-      setOptimizingYellowMomentum(false);
     }
   };
   
@@ -274,7 +140,7 @@ export default function App() {
   const [commentText, setCommentText] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [isCreatingNewSet, setIsCreatingNewSet] = useState(false);
-  const [visibleMarkerSets, setVisibleMarkerSets] = useState({});
+  const [visibleMarkerSets, setVisibleMarkerSets] = useState(savedMarkerSettings.visibleMarkerSets || {});
 
   // Draggable Modal state
   const [modalPosition, setModalPosition] = useState({ x: 100, y: 100 });
@@ -339,42 +205,52 @@ export default function App() {
   }, [activeChart]);
 
   useEffect(() => {
-    if (['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && campaignView !== 'mesReg5Recovery') {
-      setCampaignView('mesReg5Recovery');
+    const nextView = defaultCampaignView(campaignView, activeChart);
+    if (nextView !== campaignView) {
+      setCampaignView(nextView);
+    } else if (!VALID_CAMPAIGN_VIEWS.has(campaignView)) {
+      setCampaignView('dailyTarget');
     }
   }, [activeChart, campaignView]);
 
   useEffect(() => {
     localStorage.setItem(MARKER_SETTINGS_STORAGE_KEY, JSON.stringify({
-      showTrainingAnnotations,
-      showRawSignals,
-      showSignalSet2,
-      showSignalSet3,
-      showMes3TrendTailSignals,
-      showMes3PreviousTailSignals,
-      showMes3HaEmaApproachSignals,
-      showMesReg5LongTailSignals,
-      showMesReg5EmaBounceAritySignals,
-      showCampaignTrades,
-      showSecondaryPane,
       campaignView,
+      visibleMarkerSets,
+      projectingSignalSets,
     }));
   }, [
-    showTrainingAnnotations,
-    showRawSignals,
-    showSignalSet2,
-    showSignalSet3,
-    showMes3TrendTailSignals,
-    showMes3PreviousTailSignals,
-    showMes3HaEmaApproachSignals,
-    showMesReg5LongTailSignals,
-    showMesReg5EmaBounceAritySignals,
-    showCampaignTrades,
-    showSecondaryPane,
     campaignView,
+    visibleMarkerSets,
+    projectingSignalSets,
   ]);
 
-  // Fetch chart data and backtest when active selection changes or when configuration is adjusted
+  const persistMarkerSettings = (patch) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(MARKER_SETTINGS_STORAGE_KEY) || '{}');
+      localStorage.setItem(MARKER_SETTINGS_STORAGE_KEY, JSON.stringify({ ...saved, ...patch }));
+    } catch {
+      // ignore persistence errors
+    }
+  };
+
+  const toggleProjectingSignalSet = (setName) => {
+    setProjectingSignalSets(prev => {
+      const next = { ...prev, [setName]: !prev[setName] };
+      persistMarkerSettings({ projectingSignalSets: next });
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    localStorage.setItem(SIGNAL_SETS_STORAGE_KEY, JSON.stringify(customSignalSetsByChart));
+  }, [customSignalSetsByChart]);
+
+  useEffect(() => {
+    localStorage.setItem(LAST_SIGNAL_SET_STORAGE_KEY, JSON.stringify(lastSignalSetByChart));
+  }, [lastSignalSetByChart]);
+
+  // Fetch chart data and backtest when active selection changes
   useEffect(() => {
     if (activeChart) {
       fetchChartData(activeChart);
@@ -384,7 +260,6 @@ export default function App() {
         setSecondaryChartData([]);
         setCurrentHaSelection(null);
       }
-      // Keep user's saved showSecondaryPane setting
       fetchBacktest(activeChart);
       const savedBookmark = localStorage.getItem(bookmarkStorageKey(activeChart));
       try {
@@ -399,37 +274,7 @@ export default function App() {
       setBacktestResults(null);
       setBookmark(null);
     }
-  }, [
-    activeChart,
-    slopeThreshold,
-    minWick,
-    maxEmaDist,
-    retestTolerance,
-    cooldownBars,
-    exitStrategy,
-    wickBodyOffset,
-    sessionStartTime,
-    aridLookback,
-    aridMaxOverlap,
-    aridMaxReversals,
-    aridSlopeThreshold,
-    aridMinGap,
-    bounceType,
-    set3LeftLookback,
-    set3MaxLeftOverlaps,
-    set3SlopeThreshold,
-    set3MinGap,
-    set3SyntheticMinGap,
-    yellowSlopePeriod,
-    yellowFastSlope,
-    yellowSlowSlope,
-    yellowMinGap,
-    yellowMinPenetration,
-    yellowMinTail,
-    yellowArityLookback,
-    yellowMaxOverlap,
-    yellowMaxReversals,
-  ]);
+  }, [activeChart]);
 
   const fetchCharts = async () => {
     try {
@@ -444,6 +289,81 @@ export default function App() {
       console.error('Failed to fetch charts:', err);
     }
   };
+
+  const handleDatasetContextMenu = (event, chartName) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDatasetContextMenu({
+      chartName,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  };
+
+  const handleDeleteDataset = async (chartName) => {
+    setDatasetContextMenu(null);
+    const annotationCount = (allAnnotations[chartName] || []).length;
+    const confirmed = window.confirm(
+      annotationCount > 0
+        ? `Delete dataset "${chartName}" and its ${annotationCount} annotation${annotationCount === 1 ? '' : 's'}? This cannot be undone.`
+        : `Delete dataset "${chartName}"? This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/charts/${encodeURIComponent(chartName)}`, {
+        method: 'DELETE',
+      });
+      if (!res.ok) {
+        const details = await res.json().catch(() => ({}));
+        throw new Error(details.error || `Delete failed with status ${res.status}`);
+      }
+
+      const remaining = charts.filter(name => name !== chartName);
+      setCharts(remaining);
+
+      setAllAnnotations(prev => {
+        if (!Object.prototype.hasOwnProperty.call(prev, chartName)) return prev;
+        const next = { ...prev };
+        delete next[chartName];
+        return next;
+      });
+
+      if (activeChart === chartName) {
+        const nextChart = remaining[0] || '';
+        setActiveChart(nextChart);
+        if (!nextChart) {
+          setChartData([]);
+          setSecondaryChartData([]);
+          setBacktestResults(null);
+          localStorage.removeItem(ACTIVE_CHART_STORAGE_KEY);
+        }
+      }
+
+      localStorage.removeItem(bookmarkStorageKey(chartName));
+    } catch (err) {
+      console.error('Failed to delete dataset:', err);
+      alert(`Failed to delete dataset: ${err.message}`);
+    }
+  };
+
+  useEffect(() => {
+    if (!datasetContextMenu) return undefined;
+
+    const closeMenu = () => setDatasetContextMenu(null);
+    const onKeyDown = (event) => {
+      if (event.key === 'Escape') closeMenu();
+    };
+
+    window.addEventListener('click', closeMenu);
+    window.addEventListener('scroll', closeMenu, true);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('click', closeMenu);
+      window.removeEventListener('scroll', closeMenu, true);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [datasetContextMenu]);
 
   const fetchAnnotations = async () => {
     try {
@@ -523,6 +443,7 @@ export default function App() {
       } else if (e.key === 'Enter') {
         handleSaveAnnotation();
       } else if (e.key === 'Escape') {
+        setActiveProjection(null);
         setModalOpen(false);
       }
     };
@@ -606,24 +527,56 @@ export default function App() {
     setSelectedBrick(brick);
     setIsCreatingNewSet(false);
     if (existing) {
+      const existingSet = existing.markerSet || defaultMarkerSetForChart(activeChart);
       setSelectedAction(existing.action);
-      setSelectedMarkerSet(existing.markerSet || defaultMarkerSetForChart(activeChart));
+      setSelectedMarkerSet(existingSet);
       setCommentText(existing.comment || '');
       setIsEditing(true);
+      setActiveProjection(null);
+      if (existingSet) {
+        setVisibleMarkerSets(prev => ({ ...prev, [existingSet]: true }));
+      }
     } else {
-      setSelectedMarkerSet(defaultMarkerSetForChart(activeChart));
-      // Check if there is a system signal for this brick
-      const sysSignal = backtestResults?.signal_details?.find(
-        signal => signal.barIndex === brick.originalIndex
-      )?.action;
-      if (sysSignal) {
-        setSelectedAction(sysSignal);
-        setCommentText('Approving system signal');
+      const projection = Number.isInteger(barIndex) ? projectionByBarIndex.get(barIndex) : null;
+      if (projection) {
+        setSelectedAction(projection.action);
+        setSelectedMarkerSet(projection.markerSet || RANGE_LONG_TAILS_SET);
+        setCommentText(projection.comment || '');
+        setIsEditing(false);
+        setActiveProjection(projection);
+        setLastSignalSetByChart(prev => ({
+          ...prev,
+          [activeChart]: projection.markerSet || RANGE_LONG_TAILS_SET,
+        }));
       } else {
-        // Auto-prepopulate: Buy for Up bars (close > open), Sell for Down-bars (close < open)
-        const defaultAction = brick.close > brick.open ? 'Buy' : 'Sell';
-        setSelectedAction(defaultAction);
-        setCommentText('');
+        setActiveProjection(null);
+        // Keep using the last signal set chosen for this chart (or current selection)
+        const chartAnnotations = allAnnotations[activeChart] || [];
+        const knownSets = new Set(customSignalSetsByChart[activeChart] || []);
+        chartAnnotations.forEach(ann => {
+          knownSets.add(ann.markerSet || defaultMarkerSetForChart(activeChart));
+        });
+        const preferred =
+          lastSignalSetByChart[activeChart] ||
+          selectedMarkerSet ||
+          [...knownSets][0] ||
+          '';
+        const nextSet = knownSets.has(preferred) ? preferred : ([...knownSets][0] || '');
+        setSelectedMarkerSet(nextSet);
+
+        // Check if there is a system signal for this brick
+        const sysSignal = backtestResults?.signal_details?.find(
+          signal => signal.barIndex === brick.originalIndex
+        )?.action;
+        if (sysSignal) {
+          setSelectedAction(sysSignal);
+          setCommentText('Approving system signal');
+        } else {
+          // Auto-prepopulate: Buy for Up bars (close > open), Sell for Down-bars (close < open)
+          const defaultAction = brick.close > brick.open ? 'Buy' : 'Sell';
+          setSelectedAction(defaultAction);
+          setCommentText('');
+        }
       }
       setIsEditing(false);
     }
@@ -697,7 +650,18 @@ export default function App() {
     // Optimistically update UI
     const updated = { ...allAnnotations, [activeChart]: activeAnnotations };
     setAllAnnotations(updated);
-    setShowTrainingAnnotations(true);
+    const savedSetName = newAnnotation.markerSet;
+    if (savedSetName) {
+      setVisibleMarkerSets(prev => ({ ...prev, [savedSetName]: true }));
+      setCustomSignalSetsByChart(prev => {
+        const existing = prev[activeChart] || [];
+        if (existing.includes(savedSetName)) return prev;
+        return { ...prev, [activeChart]: [...existing, savedSetName] };
+      });
+      setLastSignalSetByChart(prev => ({ ...prev, [activeChart]: savedSetName }));
+      setSelectedMarkerSet(savedSetName);
+    }
+    setActiveProjection(null);
     setModalOpen(false);
 
     // Persist to disk via Node Express server
@@ -728,6 +692,7 @@ export default function App() {
     // Optimistically update UI
     const updated = { ...allAnnotations, [activeChart]: activeAnnotations };
     setAllAnnotations(updated);
+    setActiveProjection(null);
     setModalOpen(false);
 
     try {
@@ -770,16 +735,139 @@ export default function App() {
 
   const savedAnnotations = allAnnotations[activeChart] || [];
 
-  // Get all unique marker sets available in the saved annotations
+  // Signal sets = labeled training sets for this chart (not algorithmic overlays).
+  // Only list sets that exist in annotations or were explicitly created — do not
+  // force-add the default name, or empty defaults like "Training Set (0)" cannot be deleted.
   const availableMarkerSets = React.useMemo(() => {
-    const sets = new Set([RAW_RANGE_MARKER_SET, 'Training Set']);
-    savedAnnotations.forEach(ann => {
-      if (ann.markerSet) {
-        sets.add(ann.markerSet);
-      }
+    const sets = new Set();
+    (customSignalSetsByChart[activeChart] || []).forEach(name => {
+      if (name) sets.add(name);
     });
-    return [...sets].sort();
-  }, [savedAnnotations]);
+    savedAnnotations.forEach(ann => {
+      sets.add(ann.markerSet || defaultMarkerSetForChart(activeChart));
+    });
+    return [...sets].sort((a, b) => a.localeCompare(b));
+  }, [savedAnnotations, customSignalSetsByChart, activeChart]);
+
+  const persistAnnotationsForChart = async (chartName, annotations) => {
+    const response = await fetch(`${API_BASE}/annotations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileKey: chartName, annotations }),
+    });
+    if (!response.ok) {
+      const details = await response.json().catch(() => ({}));
+      throw new Error(details.error || `Annotation server returned ${response.status}`);
+    }
+  };
+
+  const handleCreateSignalSet = () => {
+    const name = newSignalSetName.trim();
+    if (!activeChart) return;
+    if (!name) {
+      alert('Enter a name for the new signal set.');
+      return;
+    }
+    if (availableMarkerSets.some(set => set.toLowerCase() === name.toLowerCase())) {
+      alert(`Signal set "${name}" already exists.`);
+      return;
+    }
+
+    setCustomSignalSetsByChart(prev => ({
+      ...prev,
+      [activeChart]: [...(prev[activeChart] || []), name],
+    }));
+    setVisibleMarkerSets(prev => ({ ...prev, [name]: true }));
+    setLastSignalSetByChart(prev => ({ ...prev, [activeChart]: name }));
+    setSelectedMarkerSet(name);
+    setIsCreatingNewSet(false);
+    setNewSignalSetName('');
+    setCreatingSignalSet(false);
+  };
+
+  const handleDeleteSignalSet = async (setName) => {
+    if (!activeChart || !setName) return;
+    const count = savedAnnotations.filter(
+      ann => (ann.markerSet || defaultMarkerSetForChart(activeChart)) === setName
+    ).length;
+    const confirmed = window.confirm(
+      count > 0
+        ? `Delete signal set "${setName}" and its ${count} annotation${count === 1 ? '' : 's'}? This cannot be undone.`
+        : `Delete empty signal set "${setName}"?`
+    );
+    if (!confirmed) return;
+
+    const previousAnnotations = allAnnotations;
+    const previousCustomSets = customSignalSetsByChart;
+    const nextAnnotations = savedAnnotations.filter(
+      ann => (ann.markerSet || defaultMarkerSetForChart(activeChart)) !== setName
+    );
+    const nextCustomSets = (customSignalSetsByChart[activeChart] || []).filter(name => name !== setName);
+
+    setAllAnnotations(prev => ({ ...prev, [activeChart]: nextAnnotations }));
+    setCustomSignalSetsByChart(prev => ({
+      ...prev,
+      [activeChart]: nextCustomSets,
+    }));
+    setVisibleMarkerSets(prev => {
+      const next = { ...prev };
+      delete next[setName];
+      return next;
+    });
+    setProjectingSignalSets(prev => {
+      if (!Object.prototype.hasOwnProperty.call(prev, setName)) return prev;
+      const next = { ...prev };
+      delete next[setName];
+      persistMarkerSettings({ projectingSignalSets: next });
+      return next;
+    });
+
+    const remainingSetNames = new Set(nextCustomSets);
+    nextAnnotations.forEach(ann => {
+      remainingSetNames.add(ann.markerSet || defaultMarkerSetForChart(activeChart));
+    });
+    const fallbackSet = [...remainingSetNames].sort((a, b) => a.localeCompare(b))[0] || '';
+    if (selectedMarkerSet === setName || !remainingSetNames.has(selectedMarkerSet)) {
+      setSelectedMarkerSet(fallbackSet);
+      setIsCreatingNewSet(false);
+    }
+
+    try {
+      await persistAnnotationsForChart(activeChart, nextAnnotations);
+    } catch (err) {
+      console.error('Failed to delete signal set:', err);
+      setAllAnnotations(previousAnnotations);
+      setCustomSignalSetsByChart(previousCustomSets);
+      alert(`Failed to delete signal set: ${err.message}`);
+    }
+  };
+
+  const handleClearSignalSet = async (setName) => {
+    if (!activeChart || !setName) return;
+    const count = savedAnnotations.filter(
+      ann => (ann.markerSet || defaultMarkerSetForChart(activeChart)) === setName
+    ).length;
+    if (count === 0) return;
+
+    const confirmed = window.confirm(
+      `Clear all ${count} signal${count === 1 ? '' : 's'} from "${setName}"? The signal set will remain, but its saved markers will be removed.`
+    );
+    if (!confirmed) return;
+
+    const previousAnnotations = allAnnotations;
+    const nextAnnotations = savedAnnotations.filter(
+      ann => (ann.markerSet || defaultMarkerSetForChart(activeChart)) !== setName
+    );
+    setAllAnnotations(prev => ({ ...prev, [activeChart]: nextAnnotations }));
+
+    try {
+      await persistAnnotationsForChart(activeChart, nextAnnotations);
+    } catch (err) {
+      console.error('Failed to clear signal set:', err);
+      setAllAnnotations(previousAnnotations);
+      alert(`Failed to clear signal set: ${err.message}`);
+    }
+  };
 
   // Construct annotations to pass to ChartComponent, including a temporary preview if the modal is open
   const currentAnnotations = React.useMemo(() => {
@@ -816,247 +904,48 @@ export default function App() {
     }
   }, [savedAnnotations, modalOpen, selectedBrick, selectedAction, selectedMarkerSet, commentText, activeChart]);
 
-  // Filtered annotations based on visibleMarkerSets state
+  // Filtered annotations based on visible signal sets (opt-in checkboxes)
   const filteredManualAnnotations = React.useMemo(() => {
     return currentAnnotations.filter(ann => {
       if (ann.isPreview) return true;
       const set = ann.markerSet || defaultMarkerSetForChart(activeChart);
-      return visibleMarkerSets[set] !== false;
+      return visibleMarkerSets[set] === true;
     });
   }, [currentAnnotations, visibleMarkerSets, activeChart]);
 
-  // Merge user annotations, system signals, and campaign trades for chart display
-  const mergedAnnotations = React.useMemo(() => {
-    const shouldShowManualAnnotations = showTrainingAnnotations || modalOpen;
-    const merged = shouldShowManualAnnotations
-      ? [...filteredManualAnnotations]
-      : filteredManualAnnotations.filter(annotation => annotation.isPreview);
-    
-    // 1. Add every raw strategy signal, including signals skipped by the campaign.
-    if (showRawSignals && backtestResults?.signal_details) {
-      backtestResults.signal_details.forEach(({ barIndex, timestamp, action }) => {
-        const evaluation = backtestResults.signal_evaluations?.find(
-          ev => ev.barIndex === barIndex && ev.direction === action
-        );
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          signalSet: 1,
-          comment: 'System generated entry',
-          evaluationResult: evaluation ? evaluation.result : 'Pending',
-        });
-      });
+  const projectedAnnotations = React.useMemo(() => {
+    if (!chartData.length) return [];
+
+    const projections = [];
+    if (projectingSignalSets[RANGE_LONG_TAILS_SET]) {
+      const labeledIndexes = new Set(
+        (allAnnotations[activeChart] || [])
+          .filter(ann => (ann.markerSet || '') === RANGE_LONG_TAILS_SET)
+          .map(ann => ann.barIndex)
+          .filter(Number.isInteger)
+      );
+      projections.push(
+        ...projectRangeLongTails(chartData, { excludeBarIndexes: labeledIndexes })
+      );
     }
+    return projections;
+  }, [chartData, projectingSignalSets, allAnnotations, activeChart]);
 
-    if (showSignalSet2 && backtestResults?.signal_set_2_details) {
-      backtestResults.signal_set_2_details.forEach(({ barIndex, timestamp, action, metrics }) => {
-        const evaluation = backtestResults.signal_set_2_evaluations?.find(
-          ev => ev.barIndex === barIndex && ev.direction === action
-        );
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          signalSet: 2,
-          metrics,
-          comment: 'EMA bounce signal',
-          evaluationResult: evaluation ? evaluation.result : 'Pending',
-        });
-      });
-    }
+  const projectionByBarIndex = React.useMemo(() => {
+    const map = new Map();
+    projectedAnnotations.forEach(projection => {
+      if (Number.isInteger(projection.barIndex)) {
+        map.set(projection.barIndex, projection);
+      }
+    });
+    return map;
+  }, [projectedAnnotations]);
 
-    if (showSignalSet3 && backtestResults?.signal_set_3_details) {
-      backtestResults.signal_set_3_details.forEach(({ barIndex, markerBarIndex, timestamp, markerTimestamp, action, setupType, virtualBrick, metrics }) => {
-        const evaluation = backtestResults.signal_set_3_evaluations?.find(
-          ev => ev.barIndex === barIndex && ev.direction === action
-        );
-        const aridETrade = backtestResults.arid_e_trades?.find(
-          trade =>
-            trade.markerBarIndex === markerBarIndex &&
-            trade.direction === action &&
-            trade.setupType === setupType
-        );
-        if (!aridETrade) return;
-        merged.push({
-          timestamp: markerTimestamp || timestamp,
-          barIndex: Number.isInteger(markerBarIndex) ? markerBarIndex : barIndex,
-          entryBarIndex: barIndex,
-          action,
-          isSystem: true,
-          signalSet: 3,
-          setupType,
-          virtualBrick,
-          metrics,
-          comment: setupType === 'synthetic'
-            ? 'No-tail synthetic arity entry'
-            : 'No-tail arity trend resumption',
-          evaluationResult: evaluation ? evaluation.result : 'Open',
-          profitBricks: evaluation?.profit_bricks,
-          aridETrade,
-        });
-      });
-    }
-
-    if (showMes3TrendTailSignals && (activeChart === 'MES3' || activeChart === 'MESM_reg_5') && backtestResults?.mes3_trend_tail_details) {
-      backtestResults.mes3_trend_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
-        const evaluation = backtestResults.mes3_trend_tail_evaluations?.find(
-          ev => ev.barIndex === barIndex && ev.direction === action
-        );
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          signalSet: 4,
-          setupType: 'mes3TrendTail',
-          metrics,
-          comment: 'MES3 8 EMA trend-tail signal',
-          evaluationResult: evaluation ? evaluation.result : 'Pending',
-        });
-      });
-    }
-
-    if (showMes3PreviousTailSignals && (activeChart === 'MES3' || activeChart === 'MESM_reg_5') && backtestResults?.mes3_previous_tail_details) {
-      backtestResults.mes3_previous_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
-        const evaluation = backtestResults.mes3_previous_tail_evaluations?.find(
-          ev => ev.barIndex === barIndex && ev.direction === action
-        );
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          signalSet: 5,
-          setupType: 'mes3PreviousTailRejection',
-          metrics,
-          comment: 'MES3 previous-bar tail rejection',
-          evaluationResult: evaluation ? evaluation.result : 'Pending',
-        });
-      });
-    }
-
-    if (showMes3HaEmaApproachSignals && (activeChart === 'MES3' || activeChart === 'MESM_reg_5') && backtestResults?.mes3_ha_ema_approach_details) {
-      backtestResults.mes3_ha_ema_approach_details.forEach(({ barIndex, timestamp, action, metrics }) => {
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          signalSet: 6,
-          setupType: 'mes3HaEmaApproachIndecisionBreakout',
-          metrics,
-          comment: 'MES3 HA indecision breakout near Renko EMA',
-          evaluationResult: 'Study',
-        });
-      });
-    }
-
-    if (showMesReg5LongTailSignals && ['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && backtestResults?.mes_reg5_long_tail_details) {
-      backtestResults.mes_reg5_long_tail_details.forEach(({ barIndex, timestamp, action, metrics }) => {
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          signalSet: 7,
-          setupType: 'mesReg5LongTail',
-          metrics,
-          comment: 'MES Reg5 Long Tail in strong trend',
-          evaluationResult: 'Study',
-        });
-      });
-    }
-
-    if (showMesReg5EmaBounceAritySignals && ['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && backtestResults?.mes_reg5_ema_bounce_arity_details) {
-      backtestResults.mes_reg5_ema_bounce_arity_details.forEach(({ barIndex, timestamp, action, metrics }) => {
-        merged.push({
-          timestamp,
-          barIndex,
-          action,
-          isSystem: true,
-          signalSet: 8,
-          setupType: 'mesReg5EmaBounceArity',
-          metrics,
-          comment: 'MES Reg5 EMA Bounce with Arity',
-          evaluationResult: 'Study',
-        });
-      });
-    }
-    
-    // 2. Add selected campaign trade markers (entries & exits) for the latest traded day.
-    if (showCampaignTrades) {
-      const selectedCampaign = CAMPAIGN_OPTIONS[campaignView] || CAMPAIGN_OPTIONS.yellowMomentum;
-      const reports = backtestResults?.[selectedCampaign.resultKey]?.daily_reports;
-      reports?.forEach(day => {
-        day.trades?.forEach((trade, idx) => {
-          merged.push({
-            timestamp: trade.entry_time,
-            barIndex: trade.entry_barIndex,
-            action: trade.direction,
-            [selectedCampaign.entryFlag]: true,
-            tradeIndex: idx + 1,
-            comment: `${selectedCampaign.label} entry #${idx + 1}`,
-          });
-
-          merged.push({
-            timestamp: trade.exit_time,
-            barIndex: trade.exit_barIndex,
-            action: trade.direction,
-            direction: trade.direction,
-            [selectedCampaign.exitFlag]: true,
-            isCampaignComplete: trade.is_campaign_complete,
-            exitResult: trade.result,
-            profitBricks: trade.profit_bricks,
-            dailyProfitBricks: trade.daily_profit_bricks,
-            tradeIndex: idx + 1,
-            comment: `${selectedCampaign.label} exit #${idx + 1} (${trade.result})`,
-          });
-        });
-        day.skipped_trades?.forEach((skipped, idx) => {
-          if (skipped.reason !== 'FastMarket') return;
-          merged.push({
-            timestamp: skipped.time,
-            barIndex: skipped.barIndex,
-            action: skipped.direction,
-            isMesReg5RecoveryCampaignSkip: selectedCampaign.resultKey === 'mes_reg5_daily_recovery_campaign_results',
-            skipReason: skipped.reason,
-            secondsSincePreviousBar: skipped.seconds_since_previous_bar,
-            tradeIndex: idx + 1,
-            comment: `${selectedCampaign.label} skipped fast-market signal #${idx + 1}`,
-          });
-        });
-        day.paper_trades?.forEach((trade, idx) => {
-          if (selectedCampaign.resultKey !== 'mes_reg5_daily_recovery_campaign_results') return;
-          merged.push({
-            timestamp: trade.entry_time,
-            barIndex: trade.entry_barIndex,
-            action: trade.direction,
-            isMesReg5RecoveryPaperEntry: true,
-            tradeIndex: idx + 1,
-            comment: `${selectedCampaign.label} paper entry #${idx + 1}`,
-          });
-
-          merged.push({
-            timestamp: trade.exit_time,
-            barIndex: trade.exit_barIndex,
-            action: trade.direction,
-            direction: trade.direction,
-            isMesReg5RecoveryPaperExit: true,
-            exitResult: trade.result,
-            profitBricks: trade.profit_bricks,
-            tradeIndex: idx + 1,
-            comment: `${selectedCampaign.label} paper exit #${idx + 1} (${trade.result})`,
-          });
-        });
-      });
-    }
-    
-    return merged;
-  }, [filteredManualAnnotations, backtestResults, showTrainingAnnotations, showRawSignals, showSignalSet2, showSignalSet3, showMes3TrendTailSignals, showMes3PreviousTailSignals, showMes3HaEmaApproachSignals, showMesReg5LongTailSignals, showMesReg5EmaBounceAritySignals, showCampaignTrades, campaignView, activeChart, modalOpen]);
-
+  // Training markers + optional AI projections for enabled signal sets
+  const mergedAnnotations = React.useMemo(
+    () => [...filteredManualAnnotations, ...projectedAnnotations],
+    [filteredManualAnnotations, projectedAnnotations]
+  );
   // Compute performance and alignment stats
   const stats = React.useMemo(() => {
     if (!backtestResults || !backtestResults.signal_evaluations) return null;
@@ -1077,7 +966,7 @@ export default function App() {
     
     const campaign = backtestResults.campaign_results || {};
     const campaignSummary = campaign.summary || {};
-    const selectedCampaign = CAMPAIGN_OPTIONS[campaignView] || CAMPAIGN_OPTIONS.yellowMomentum;
+    const selectedCampaign = CAMPAIGN_OPTIONS[campaignView] || CAMPAIGN_OPTIONS.dailyTarget;
     const selectedCampaignResults = backtestResults[selectedCampaign.resultKey] || {};
     const selectedCampaignSummary = selectedCampaignResults.summary || {};
     const selectedCampaignRules = selectedCampaignResults.rules || {};
@@ -1150,7 +1039,10 @@ export default function App() {
                   onClick={() => {
                     setActiveChart(c);
                     setDatasetsDrawerOpen(false);
+                    setDatasetContextMenu(null);
                   }}
+                  onContextMenu={(event) => handleDatasetContextMenu(event, c)}
+                  title="Left-click to open · Right-click for options"
                 >
                   <span className="file-name">{c}</span>
                   <span className="file-meta">
@@ -1161,6 +1053,23 @@ export default function App() {
             </div>
           )}
         </div>
+
+        {datasetContextMenu && (
+          <div
+            className="dataset-context-menu"
+            style={{ top: datasetContextMenu.y, left: datasetContextMenu.x }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <button
+              type="button"
+              className="dataset-context-menu-item danger"
+              onClick={() => handleDeleteDataset(datasetContextMenu.chartName)}
+            >
+              Delete dataset…
+            </button>
+          </div>
+        )}
 
         {/* Dynamic Help Widget */}
         <div className="upload-zone">
@@ -1179,563 +1088,187 @@ export default function App() {
         {/* Strategy & Alignment Card */}
         {chartData.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {/* Strategy Configuration Card */}
+            {/* Signal Sets */}
             <div style={{ background: 'var(--bg-card)', padding: '14px', borderRadius: '12px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
-              <h4 style={{ color: 'var(--primary)', marginBottom: '10px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><span>⚙️</span> Strategy Config</span>
-                <button 
-                  onClick={handleOptimize} 
-                  disabled={optimizing}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '10px' }}>
+                <h4 style={{ color: 'var(--primary)', margin: 0, fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>🏷️</span> Signal Sets
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCreatingSignalSet(true);
+                    setNewSignalSetName('');
+                  }}
                   style={{
-                    background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)',
-                    color: '#ffffff',
-                    border: 'none',
+                    background: 'transparent',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--primary)',
                     borderRadius: '6px',
                     padding: '4px 8px',
-                    fontSize: '10px',
+                    fontSize: '11px',
                     fontWeight: '600',
                     cursor: 'pointer',
-                    boxShadow: '0 2px 4px rgba(59, 130, 246, 0.2)',
-                    transition: 'all 0.2s',
-                    opacity: optimizing ? 0.7 : 1
                   }}
-                  onMouseOver={(e) => e.currentTarget.style.filter = 'brightness(1.1)'}
-                  onMouseOut={(e) => e.currentTarget.style.filter = 'brightness(1.0)'}
                 >
-                  {optimizing ? 'Optimizing...' : 'Auto-Optimize ⚡'}
+                  + New
                 </button>
-              </h4>
-              
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                {/* Min Wick Length */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Min Wick Length:</span>
-                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{minWick.toFixed(1)} pt</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="40" 
-                    step="0.5" 
-                    value={minWick} 
-                    onChange={(e) => setMinWick(parseFloat(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
-                  />
-                </div>
+                <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '11px', lineHeight: 1.4 }}>
+                  Your labeled training sets. Check a set to show its Buy/Sell/Skip markers on the chart.
+                </p>
 
-                {/* Max EMA Distance */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Max EMA Distance:</span>
-                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{maxEmaDist.toFixed(1)} pt</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="5" 
-                    max="100" 
-                    step="1" 
-                    value={maxEmaDist} 
-                    onChange={(e) => setMaxEmaDist(parseFloat(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
-                  />
-                </div>
-
-                {/* EMA Slope Threshold */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>EMA Slope Threshold:</span>
-                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{slopeThreshold.toFixed(1)} pt</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0.5" 
-                    max="50" 
-                    step="0.5" 
-                    value={slopeThreshold} 
-                    onChange={(e) => setSlopeThreshold(parseFloat(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
-                  />
-                </div>
-
-                {/* Wick Retest Tolerance */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Retest Tolerance:</span>
-                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{retestTolerance.toFixed(1)} pt</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0.5" 
-                    max="30" 
-                    step="0.5" 
-                    value={retestTolerance} 
-                    onChange={(e) => setRetestTolerance(parseFloat(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
-                  />
-                </div>
-
-                {/* 50 EMA slider removed */}
-
-                {/* Time Cool-Down (bars) */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Time Cool-Down:</span>
-                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{cooldownBars} bars</span>
-                  </div>
-                  <input 
-                    type="range" 
-                    min="0" 
-                    max="20" 
-                    step="1" 
-                    value={cooldownBars} 
-                    onChange={(e) => setCooldownBars(parseInt(e.target.value, 10))}
-                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
-                  />
-                </div>
-
-                {/* Wick Body Offset (ticks) */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Wick Body Offset:</span>
-                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{wickBodyOffset} ticks</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="-30"
-                    max="10"
-                    step="1"
-                    value={wickBodyOffset}
-                    onChange={(e) => setWickBodyOffset(parseInt(e.target.value, 10))}
-                    style={{ width: '100%', accentColor: 'var(--primary)', height: '4px', borderRadius: '2px', outline: 'none' }}
-                  />
-                </div>
-
-                {/* Session Start Time */}
-                <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ color: 'var(--text-secondary)' }}>Earliest Entry:</span>
-                    <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{sessionStartTime}</span>
-                  </div>
-                  <input
-                    type="time"
-                    step="1"
-                    value={sessionStartTime}
-                    onChange={(e) => setSessionStartTime(e.target.value.length === 5 ? `${e.target.value}:00` : e.target.value)}
-                    style={{ width: '100%', colorScheme: 'dark' }}
-                  />
-                </div>
-
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
-                  <div style={{ color: 'var(--primary)', fontWeight: '600', marginBottom: '8px' }}>
-                    Signal Set 2: EMA Bounce
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Bounce Type</span><strong>{bounceType}</strong>
-                      </span>
-                      <select
-                        value={bounceType}
-                        onChange={(e) => setBounceType(e.target.value)}
-                        style={{
-                          width: '100%',
-                          height: '32px',
-                          marginTop: '4px',
-                          background: 'var(--bg-main)',
-                          color: 'var(--text-main)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: '6px',
-                          padding: '0 8px',
-                        }}
-                      >
-                        <option value="green">Green bounces</option>
-                        <option value="yellow">Yellow bounces</option>
-                        <option value="all">All bounces</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Lookback</span><strong>{aridLookback} bars</strong>
-                      </span>
-                      <input type="range" min="4" max="16" step="1" value={aridLookback} onChange={(e) => setAridLookback(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#0891b2' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Maximum Clumping</span><strong>{aridMaxOverlap.toFixed(2)} overlaps</strong>
-                      </span>
-                      <input type="range" min="0" max="1.5" step="0.05" value={aridMaxOverlap} onChange={(e) => setAridMaxOverlap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Maximum Reversals</span><strong>{aridMaxReversals}</strong>
-                      </span>
-                      <input type="range" min="0" max="5" step="1" value={aridMaxReversals} onChange={(e) => setAridMaxReversals(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#0891b2' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>EMA Trend Strength</span><strong>{aridSlopeThreshold.toFixed(1)} pt</strong>
-                      </span>
-                      <input type="range" min="1" max="20" step="0.5" value={aridSlopeThreshold} onChange={(e) => setAridSlopeThreshold(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Score Padding</span><strong>{aridMinGap.toFixed(2)}</strong>
-                      </span>
-                      <input type="range" min="0" max="3" step="0.25" value={aridMinGap} onChange={(e) => setAridMinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#0891b2' }} />
-                    </label>
-                  </div>
-                </div>
-
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
-                  <div style={{ color: '#eab308', fontWeight: '600', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
-                    <span>Yellow Momentum 1:1</span>
+                {creatingSignalSet && (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      value={newSignalSetName}
+                      onChange={(e) => setNewSignalSetName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleCreateSignalSet();
+                        } else if (e.key === 'Escape') {
+                          setCreatingSignalSet(false);
+                          setNewSignalSetName('');
+                        }
+                      }}
+                      placeholder="New signal set name"
+                      autoFocus
+                      style={{
+                        flex: 1,
+                        height: '30px',
+                        padding: '0 8px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--bg-main)',
+                        color: 'var(--text-main)',
+                        fontSize: '12px',
+                      }}
+                    />
                     <button
                       type="button"
-                      onClick={handleOptimizeYellowMomentum}
-                      disabled={optimizingYellowMomentum}
+                      onClick={handleCreateSignalSet}
                       style={{
-                        background: '#eab308',
-                        color: '#111827',
-                        border: 'none',
+                        height: '30px',
+                        padding: '0 10px',
                         borderRadius: '6px',
-                        padding: '4px 8px',
+                        border: 'none',
+                        background: 'var(--primary)',
+                        color: '#041018',
                         fontSize: '11px',
                         fontWeight: '700',
-                        cursor: optimizingYellowMomentum ? 'default' : 'pointer',
-                        opacity: optimizingYellowMomentum ? 0.65 : 1,
+                        cursor: 'pointer',
                       }}
                     >
-                      {optimizingYellowMomentum ? 'Optimizing...' : 'Optimize'}
+                      Add
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCreatingSignalSet(false);
+                        setNewSignalSetName('');
+                      }}
+                      style={{
+                        height: '30px',
+                        padding: '0 8px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: 'transparent',
+                        color: 'var(--text-secondary)',
+                        fontSize: '11px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Cancel
                     </button>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Slope Lookback</span><strong>{yellowSlopePeriod} bars</strong>
-                      </span>
-                      <input type="range" min="4" max="12" step="1" value={yellowSlopePeriod} onChange={(e) => setYellowSlopePeriod(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>5 EMA Steepness</span><strong>{yellowFastSlope.toFixed(1)} pt</strong>
-                      </span>
-                      <input type="range" min="10" max="50" step="1" value={yellowFastSlope} onChange={(e) => setYellowFastSlope(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>10 EMA Steepness</span><strong>{yellowSlowSlope.toFixed(1)} pt</strong>
-                      </span>
-                      <input type="range" min="8" max="45" step="1" value={yellowSlowSlope} onChange={(e) => setYellowSlowSlope(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>EMA Separation</span><strong>{yellowMinGap.toFixed(1)} pt</strong>
-                      </span>
-                      <input type="range" min="0" max="12" step="0.5" value={yellowMinGap} onChange={(e) => setYellowMinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Yellow Penetration</span><strong>{yellowMinPenetration.toFixed(1)} pt</strong>
-                      </span>
-                      <input type="range" min="0" max="8" step="0.5" value={yellowMinPenetration} onChange={(e) => setYellowMinPenetration(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Tail Length</span><strong>{yellowMinTail.toFixed(1)} pt</strong>
-                      </span>
-                      <input type="range" min="0" max="8" step="0.5" value={yellowMinTail} onChange={(e) => setYellowMinTail(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Arity Lookback</span><strong>{yellowArityLookback} bars</strong>
-                      </span>
-                      <input type="range" min="4" max="14" step="1" value={yellowArityLookback} onChange={(e) => setYellowArityLookback(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Maximum Clumping</span><strong>{yellowMaxOverlap.toFixed(2)}</strong>
-                      </span>
-                      <input type="range" min="0.35" max="1.4" step="0.05" value={yellowMaxOverlap} onChange={(e) => setYellowMaxOverlap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Maximum Reversals</span><strong>{yellowMaxReversals}</strong>
-                      </span>
-                      <input type="range" min="0" max="6" step="1" value={yellowMaxReversals} onChange={(e) => setYellowMaxReversals(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#eab308' }} />
-                    </label>
-                    {yellowOptimizationSummary && (
-                      <div style={{ color: 'var(--text-secondary)', borderTop: '1px solid var(--border-color)', paddingTop: '8px', lineHeight: '1.5' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span>Tested:</span>
-                          <strong>{yellowOptimizationSummary.tested_configs}</strong>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span>Best Net:</span>
-                          <strong style={{ color: (yellowOptimizationSummary.best_summary?.net_profit_bricks || 0) >= 0 ? '#10b981' : '#ef4444' }}>
-                            {(yellowOptimizationSummary.best_summary?.net_profit_bricks || 0).toFixed(1)} ranges
-                          </strong>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                )}
 
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
-                  <div style={{ color: '#7c3aed', fontWeight: '600', marginBottom: '8px' }}>
-                    Signal Set 3: No-Tail Arity
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Left-Side Lookback</span><strong>{set3LeftLookback} bars</strong>
-                      </span>
-                      <input type="range" min="3" max="30" step="1" value={set3LeftLookback} onChange={(e) => setSet3LeftLookback(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#7c3aed' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Maximum Left Overlaps</span><strong>{set3MaxLeftOverlaps}</strong>
-                      </span>
-                      <input type="range" min="0" max="8" step="1" value={set3MaxLeftOverlaps} onChange={(e) => setSet3MaxLeftOverlaps(parseInt(e.target.value, 10))} style={{ width: '100%', accentColor: '#7c3aed' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>EMA Trend Strength</span><strong>{set3SlopeThreshold.toFixed(1)} pt</strong>
-                      </span>
-                      <input type="range" min="1" max="20" step="0.5" value={set3SlopeThreshold} onChange={(e) => setSet3SlopeThreshold(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Minimum EMA Separation</span><strong>{set3MinGap.toFixed(2)} bricks</strong>
-                      </span>
-                      <input type="range" min="0" max="3" step="0.25" value={set3MinGap} onChange={(e) => setSet3MinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
-                    </label>
-                    <label>
-                      <span style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)' }}>
-                        <span>Synthetic EMA Clearance</span><strong>{set3SyntheticMinGap.toFixed(2)} bricks</strong>
-                      </span>
-                      <input type="range" min="-1" max="4" step="0.25" value={set3SyntheticMinGap} onChange={(e) => setSet3SyntheticMinGap(parseFloat(e.target.value))} style={{ width: '100%', accentColor: '#7c3aed' }} />
-                    </label>
-                  </div>
-                </div>
-
-                {/* Exit Strategy Selector */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Exit Strategy Permutation:</span>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', marginTop: '4px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
-                      <input 
-                        type="radio" 
-                        name="exitStrategy" 
-                        value="fixed" 
-                        checked={exitStrategy === 'fixed'} 
-                        onChange={() => setExitStrategy('fixed')} 
-                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
-                      />
-                      Fixed Target (Campaign 1)
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'fixed2' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
-                      <input 
-                        type="radio" 
-                        name="exitStrategy" 
-                        value="fixed2" 
-                        checked={exitStrategy === 'fixed2'} 
-                        onChange={() => setExitStrategy('fixed2')} 
-                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
-                      />
-                      Fixed Target 2 (Optimized)
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'trail' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
-                      <input 
-                        type="radio" 
-                        name="exitStrategy" 
-                        value="trail" 
-                        checked={exitStrategy === 'trail'} 
-                        onChange={() => setExitStrategy('trail')} 
-                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
-                      />
-                      Winners Run
-                    </label>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer', fontWeight: '500', color: exitStrategy === 'stepup' ? 'var(--primary)' : 'var(--text-secondary)', fontSize: '12px' }}>
-                      <input 
-                        type="radio" 
-                        name="exitStrategy" 
-                        value="stepup" 
-                        checked={exitStrategy === 'stepup'} 
-                        onChange={() => setExitStrategy('stepup')} 
-                        style={{ accentColor: 'var(--primary)', cursor: 'pointer' }}
-                      />
-                      Step Up on Loss
-                    </label>
-                  </div>
-                </div>
-
-                {/* Chart Marker Filters */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '7px', marginTop: '6px' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontWeight: '500' }}>Chart Markers:</span>
-                  <label htmlFor="showTrainingAnnotations" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                    <input
-                      type="checkbox"
-                      id="showTrainingAnnotations"
-                      checked={showTrainingAnnotations}
-                      onChange={(e) => setShowTrainingAnnotations(e.target.checked)}
-                      style={{ accentColor: '#22c55e', cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                    Training Annotations ({currentAnnotations.length})
-                  </label>
-                  
-                  {/* Indented checklist for individual Marker Sets */}
-                  {showTrainingAnnotations && availableMarkerSets.length > 0 && (
-                    <div style={{ paddingLeft: '20px', display: 'flex', flexDirection: 'column', gap: '5px', marginTop: '2px', borderLeft: '1px dashed var(--border-color)', marginLeft: '7px' }}>
-                      {availableMarkerSets.map(set => {
-                        const count = savedAnnotations.filter(ann => (ann.markerSet || defaultMarkerSetForChart(activeChart)) === set).length;
-                        const isChecked = visibleMarkerSets[set] !== false;
-                        return (
-                          <label key={set} style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '11px', fontWeight: '500', userSelect: 'none' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  {availableMarkerSets.length === 0 ? (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '11px' }}>
+                      No signal sets yet. Create one to start labeling.
+                    </div>
+                  ) : (
+                    availableMarkerSets.map(set => {
+                      const count = savedAnnotations.filter(
+                        ann => (ann.markerSet || defaultMarkerSetForChart(activeChart)) === set
+                      ).length;
+                      const isChecked = visibleMarkerSets[set] === true;
+                      const canProject = isProjectableSignalSet(set);
+                      const isProjecting = projectingSignalSets[set] === true;
+                      const projectionCount = canProject && isProjecting
+                        ? projectedAnnotations.filter(p => p.markerSet === set).length
+                        : 0;
+                      return (
+                        <div key={set} className="signal-set-row">
+                          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none', flex: 1, minWidth: 0 }}>
                             <input
                               type="checkbox"
                               checked={isChecked}
                               onChange={() => setVisibleMarkerSets(prev => ({ ...prev, [set]: !isChecked }))}
-                              style={{ accentColor: '#22c55e', cursor: 'pointer', width: '13px', height: '13px' }}
+                              style={{ accentColor: '#22c55e', cursor: 'pointer', width: '16px', height: '16px', flexShrink: 0 }}
                             />
-                            {set} ({count})
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {set} ({count})
+                            </span>
                           </label>
-                        );
-                      })}
-                    </div>
+                          {canProject && (
+                            <label
+                              title="Show AI-projected Buy/Sell markers inferred from this training set"
+                              style={{ display: 'flex', alignItems: 'center', gap: '4px', color: isProjecting ? '#22d3ee' : 'var(--text-muted)', cursor: 'pointer', fontSize: '11px', fontWeight: '600', userSelect: 'none', flexShrink: 0 }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isProjecting}
+                                onChange={() => toggleProjectingSignalSet(set)}
+                                style={{ accentColor: '#22d3ee', cursor: 'pointer', width: '14px', height: '14px' }}
+                              />
+                              Project{isProjecting ? ` (${projectionCount})` : ''}
+                            </label>
+                          )}
+                          <button
+                            type="button"
+                            title={`Clear ${count} signal${count === 1 ? '' : 's'} from ${set}`}
+                            disabled={count === 0}
+                            onClick={() => handleClearSignalSet(set)}
+                            style={{
+                              border: '1px solid var(--border-color)',
+                              background: 'transparent',
+                              color: count > 0 ? 'var(--text-secondary)' : 'var(--text-muted)',
+                              cursor: count > 0 ? 'pointer' : 'not-allowed',
+                              fontSize: '11px',
+                              padding: '3px 6px',
+                              borderRadius: '4px',
+                              flexShrink: 0,
+                            }}
+                          >
+                            Clear
+                          </button>
+                          <button
+                            type="button"
+                            title={`Delete ${set}`}
+                            onClick={() => handleDeleteSignalSet(set)}
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              color: 'var(--color-sell, #ff5c7a)',
+                              cursor: 'pointer',
+                              fontSize: '11px',
+                              padding: '4px 6px',
+                              borderRadius: '4px',
+                              flexShrink: 0,
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      );
+                    })
                   )}
-                  <label htmlFor="showRawSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                    <input
-                      type="checkbox"
-                      id="showRawSignals"
-                      checked={showRawSignals}
-                      onChange={(e) => setShowRawSignals(e.target.checked)}
-                      style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                    Raw Signal Set 1
-                  </label>
-                  <label htmlFor="showSignalSet2" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                    <input
-                      type="checkbox"
-                      id="showSignalSet2"
-                      checked={showSignalSet2}
-                      onChange={(e) => setShowSignalSet2(e.target.checked)}
-                      style={{ accentColor: '#0891b2', cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                    EMA Bounce Set 2 ({backtestResults?.signal_set_2_details?.length || 0})
-                  </label>
-                  <label htmlFor="showSignalSet3" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                    <input
-                      type="checkbox"
-                      id="showSignalSet3"
-                      checked={showSignalSet3}
-                      onChange={(e) => setShowSignalSet3(e.target.checked)}
-                      style={{ accentColor: '#7c3aed', cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                    No-Tail Arity Set 3 ({backtestResults?.signal_set_3_details?.length || 0})
-                  </label>
-                  {(activeChart === 'MES3' || activeChart === 'MESM_reg_5') && (
-                    <>
-                      <label htmlFor="showMes3PreviousTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                        <input
-                          type="checkbox"
-                          id="showMes3PreviousTailSignals"
-                          checked={showMes3PreviousTailSignals}
-                          onChange={(e) => setShowMes3PreviousTailSignals(e.target.checked)}
-                          style={{ accentColor: '#f59e0b', cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                        MES3 Prev-Bar Tail Rejections ({backtestResults?.mes3_previous_tail_details?.length || 0})
-                      </label>
-                      <label htmlFor="showMes3TrendTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                        <input
-                          type="checkbox"
-                          id="showMes3TrendTailSignals"
-                          checked={showMes3TrendTailSignals}
-                          onChange={(e) => setShowMes3TrendTailSignals(e.target.checked)}
-                          style={{ accentColor: '#f59e0b', cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                        MES3 8 EMA Trend-Tail ({backtestResults?.mes3_trend_tail_details?.length || 0})
-                      </label>
-                      <label htmlFor="showMes3HaEmaApproachSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                        <input
-                          type="checkbox"
-                          id="showMes3HaEmaApproachSignals"
-                          checked={showMes3HaEmaApproachSignals}
-                          onChange={(e) => setShowMes3HaEmaApproachSignals(e.target.checked)}
-                          style={{ accentColor: '#14b8a6', cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                        HA 10 EMA Reclaim Tail Setup ({backtestResults?.mes3_ha_ema_approach_details?.length || 0})
-                      </label>
-                      {['MESM_reg_5', 'MES_8pt', 'MES_3pt'].includes(activeChart) && (
-                        <>
-                          <label htmlFor="showMesReg5LongTailSignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                            <input
-                              type="checkbox"
-                              id="showMesReg5LongTailSignals"
-                              checked={showMesReg5LongTailSignals}
-                              onChange={(e) => setShowMesReg5LongTailSignals(e.target.checked)}
-                              style={{ accentColor: '#7c3aed', cursor: 'pointer', width: '16px', height: '16px' }}
-                            />
-                            MES Reg5 Long Tail ({backtestResults?.mes_reg5_long_tail_details?.length || 0})
-                          </label>
-                          <label htmlFor="showMesReg5EmaBounceAritySignals" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                            <input
-                              type="checkbox"
-                              id="showMesReg5EmaBounceAritySignals"
-                              checked={showMesReg5EmaBounceAritySignals}
-                              onChange={(e) => setShowMesReg5EmaBounceAritySignals(e.target.checked)}
-                              style={{ accentColor: '#10b981', cursor: 'pointer', width: '16px', height: '16px' }}
-                            />
-                            MES Reg5 EMA Bounce Arity ({backtestResults?.mes_reg5_ema_bounce_arity_details?.length || 0})
-                          </label>
-                        </>
-                      )}
-                      <label htmlFor="showSecondaryPane" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none', marginTop: '4px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '6px' }}>
-                        <input
-                          type="checkbox"
-                          id="showSecondaryPane"
-                          checked={showSecondaryPane}
-                          onChange={(e) => setShowSecondaryPane(e.target.checked)}
-                          style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
-                        />
-                        Show Heiken Ashi Pane
-                      </label>
-                    </>
-                  )}
-                  <label htmlFor="showCampaignTrades" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: '12px', fontWeight: '500', userSelect: 'none' }}>
-                    <input
-                      type="checkbox"
-                      id="showCampaignTrades"
-                      checked={showCampaignTrades}
-                      onChange={(e) => setShowCampaignTrades(e.target.checked)}
-                      style={{ accentColor: 'var(--primary)', cursor: 'pointer', width: '16px', height: '16px' }}
-                    />
-                    Campaign Trades and Outcomes
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', color: 'var(--text-secondary)', fontSize: '12px', fontWeight: '500' }}>
-                    <span>Campaign View</span>
-                    <select
-                      value={campaignView}
-                      onChange={(e) => setCampaignView(e.target.value)}
-                      style={{
-                        width: '100%',
-                        height: '32px',
-                        background: 'var(--bg-main)',
-                        color: 'var(--text-main)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '6px',
-                        padding: '0 8px',
-                      }}
-                    >
-                      {Object.entries(CAMPAIGN_OPTIONS).map(([value, option]) => (
-                        <option key={value} value={value}>{option.label}</option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '8px', marginTop: '4px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
-                  Performance test: one 15-tick favorable brick before the signal tail is exceeded by 2 ticks.
                 </div>
               </div>
             </div>
@@ -1814,18 +1347,6 @@ export default function App() {
                   </h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ color: 'var(--text-secondary)' }}>Exit Strategy:</span>
-                      <span style={{ fontWeight: '600', textTransform: 'capitalize', color: 'var(--primary)' }}>
-                        {backtestResults?.campaign_results?.exit_strategy === 'trail' 
-                          ? 'Winners Run' 
-                          : backtestResults?.campaign_results?.exit_strategy === 'stepup' 
-                            ? 'Step Up on Loss' 
-                            : backtestResults?.campaign_results?.exit_strategy === 'fixed2'
-                              ? 'Fixed Target 2 (Optimized)'
-                              : 'Fixed Target (Campaign 1)'}
-                      </span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Trading Days:</span>
                       <span style={{ fontWeight: '600' }}>{stats.campaignTotalDays} days</span>
                     </div>
@@ -1849,13 +1370,13 @@ export default function App() {
                 </div>
 
                 <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '10px' }}>
-                  <h4 style={{ color: campaignView === 'yellowMomentum' ? '#eab308' : '#0891b2', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <h4 style={{ color: campaignView === 'mesReg5Recovery' ? '#10b981' : 'var(--primary)', marginBottom: '8px', fontSize: '13px', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '6px' }}>
                     <span>↗</span> {stats.selectedCampaignName}
                   </h4>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Selected View:</span>
-                      <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{CAMPAIGN_OPTIONS[campaignView]?.label || 'Yellow Momentum 1:1'}</span>
+                      <span style={{ fontWeight: '600', color: 'var(--primary)' }}>{CAMPAIGN_OPTIONS[campaignView]?.label || 'Daily Target Campaign'}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span style={{ color: 'var(--text-secondary)' }}>Exit:</span>
@@ -2070,11 +1591,14 @@ export default function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ color: 'var(--text-muted)', cursor: 'move', userSelect: 'none' }}>⋮⋮</span>
                 <span className="modal-title" style={{ margin: 0 }}>
-                  {isEditing ? 'Modify Annotation' : 'Add Trade Annotation'}
+                  {isEditing ? 'Edit Annotation' : 'Add Trade Annotation'}
                 </span>
               </div>
               <button 
-                onClick={() => setModalOpen(false)}
+                onClick={() => {
+                  setActiveProjection(null);
+                  setModalOpen(false);
+                }}
                 style={{
                   background: 'none',
                   border: 'none',
@@ -2101,6 +1625,47 @@ export default function App() {
                 {selectedBrick.originalTime || selectedBrick.time}
               </span>
             </div>
+            {activeProjection && !isEditing && (
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-main)',
+                  background: 'rgba(34, 211, 238, 0.08)',
+                  border: '1px solid rgba(34, 211, 238, 0.4)',
+                  borderRadius: '6px',
+                  padding: '8px 9px',
+                  lineHeight: 1.45,
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '2px', color: '#22d3ee' }}>
+                  AI projection ({activeProjection.projectionRule}) — confirm, change, or Skip
+                </div>
+                <div style={{ color: 'var(--text-secondary)' }}>
+                  Suggested {activeProjection.action}. Save to add it to the signal set, or Skip to mark a false positive.
+                </div>
+              </div>
+            )}
+            {isEditing && (
+              <div
+                style={{
+                  fontSize: '11px',
+                  color: 'var(--text-main)',
+                  background: 'rgba(34, 197, 94, 0.08)',
+                  border: '1px solid rgba(34, 197, 94, 0.35)',
+                  borderRadius: '6px',
+                  padding: '8px 9px',
+                  lineHeight: 1.45,
+                }}
+              >
+                <div style={{ fontWeight: 600, marginBottom: '2px', color: '#22c55e' }}>
+                  Existing annotation loaded — edit and Update to save changes
+                </div>
+                <div style={{ color: 'var(--text-secondary)' }}>
+                  {(selectedMarkerSet || defaultMarkerSetForChart(activeChart)) + ' · ' + (selectedAction || 'Unlabeled')}
+                  {commentText ? ` — ${commentText}` : ''}
+                </div>
+              </div>
+            )}
             <div
               style={{
                 fontSize: '11px',
@@ -2148,7 +1713,7 @@ export default function App() {
             </div>
 
             <div>
-              <div style={{ fontSize: '12px', fontWeight: '500', marginBottom: '6px' }}>Marker Set:</div>
+              <div style={{ fontSize: '12px', fontWeight: '500', marginBottom: '6px' }}>Signal Set:</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 <select
                   className="marker-set-select"
@@ -2160,9 +1725,11 @@ export default function App() {
                     } else {
                       setIsCreatingNewSet(false);
                       setSelectedMarkerSet(e.target.value);
+                      if (activeChart && e.target.value) {
+                        setLastSignalSetByChart(prev => ({ ...prev, [activeChart]: e.target.value }));
+                      }
                     }
                   }}
-                  style={{ width: '100%', padding: '6px', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'var(--bg-secondary)', color: 'var(--text-primary)', fontSize: '12px' }}
                 >
                   {availableMarkerSets.map(set => (
                     <option key={set} value={set}>{set}</option>
@@ -2172,18 +1739,10 @@ export default function App() {
                 {isCreatingNewSet && (
                   <input
                     type="text"
+                    className="marker-set-input"
                     placeholder="Enter new set name..."
                     value={selectedMarkerSet}
                     onChange={e => setSelectedMarkerSet(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '6px',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      background: 'var(--bg-secondary)',
-                      color: 'var(--text-primary)',
-                      fontSize: '12px',
-                    }}
                   />
                 )}
               </div>
@@ -2241,7 +1800,10 @@ export default function App() {
               </button>
               <button
                 className="btn btn-secondary"
-                onClick={() => setModalOpen(false)}
+                onClick={() => {
+                  setActiveProjection(null);
+                  setModalOpen(false);
+                }}
               >
                 Cancel
               </button>
@@ -2249,7 +1811,7 @@ export default function App() {
                 className="btn btn-primary"
                 onClick={handleSaveAnnotation}
               >
-                Save
+                {isEditing ? 'Update' : 'Save'}
               </button>
             </div>
           </div>

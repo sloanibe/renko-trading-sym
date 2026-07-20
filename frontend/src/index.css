@@ -194,6 +194,49 @@ body {
   box-shadow: inset 3px 0 0 var(--primary);
 }
 
+.dataset-context-menu {
+  position: fixed;
+  z-index: 1200;
+  min-width: 180px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-card, #121820);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+
+.dataset-context-menu-item {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--text-main);
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.dataset-context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.dataset-context-menu-item.danger {
+  color: var(--color-sell, #ff5c7a);
+}
+
+.signal-set-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px;
+  border-radius: 6px;
+}
+
+.signal-set-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .file-name {
   font-size: 14px;
   font-weight: 500;
@@ -616,12 +659,35 @@ body {
 .marker-set-select {
   width: 100%;
   height: 34px;
-  background: var(--bg-main);
+  background-color: #121820;
   border: 1px solid var(--border-color);
   border-radius: 6px;
   padding: 0 8px;
-  color: var(--text-main);
+  color: #f3f4f6;
   font-size: 12px;
+  color-scheme: dark;
+}
+
+.marker-set-select option,
+.marker-set-select optgroup {
+  background-color: #121820;
+  color: #f3f4f6;
+}
+
+.marker-set-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background-color: #121820;
+  color: #f3f4f6;
+  font-size: 12px;
+  color-scheme: dark;
+}
+
+.marker-set-input::placeholder {
+  color: #9ca3af;
 }
 
 .comment-input {

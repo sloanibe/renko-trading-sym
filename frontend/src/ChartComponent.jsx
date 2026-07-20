@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
+import { getAnnotationOutcome, inferBrickSize } from './annotationOutcomes';
 
 const SESSION_OPEN_TIME = '06:30:00';
 
@@ -167,18 +168,6 @@ const getSessionOpenIndices = (data) => {
   return [...firstBarByDate.values()];
 };
 
-const inferBrickSize = (data) => {
-  const counts = new Map();
-  (data || []).forEach((bar) => {
-    const size = Math.abs(Number(bar.close) - Number(bar.open));
-    if (!Number.isFinite(size) || size <= 0) return;
-    const key = size.toFixed(10);
-    counts.set(key, (counts.get(key) || 0) + 1);
-  });
-  const [size] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0] || [15];
-  return Number(size);
-};
-
 const formatChartData = (data) => {
   const originalTimeByChartTime = new Map();
   const barIndexByChartTime = new Map();
@@ -201,6 +190,32 @@ const formatChartData = (data) => {
   });
 
   return { formattedData, originalTimeByChartTime, barIndexByChartTime };
+};
+
+/** Standard EMA seeded with SMA of the first `period` closes. */
+const computeEmaSeries = (bars, period) => {
+  const values = new Array(bars.length).fill(null);
+  if (!bars?.length || period < 1) return values;
+
+  const multiplier = 2 / (period + 1);
+  if (bars.length < period) {
+    const avg = bars.reduce((sum, bar) => sum + bar.close, 0) / bars.length;
+    return bars.map(() => avg);
+  }
+
+  let ema = 0;
+  for (let i = 0; i < period; i += 1) {
+    ema += bars[i].close;
+  }
+  ema /= period;
+  for (let i = 0; i < period; i += 1) {
+    values[i] = ema;
+  }
+  for (let i = period; i < bars.length; i += 1) {
+    ema = (bars[i].close * multiplier) + (ema * (1 - multiplier));
+    values[i] = ema;
+  }
+  return values;
 };
 
 const getOriginalDateForChartTime = (chartTime, originalTimeByChartTime) => {
@@ -862,11 +877,14 @@ export default function ChartComponent({
   const secondaryCandlestickSeriesRef = useRef(null);
   const ema5SeriesRef = useRef(null);
   const ema10SeriesRef = useRef(null);
+  const ema24SeriesRef = useRef(null);
   const secondaryMa1SeriesRef = useRef(null);
   const secondaryMa2SeriesRef = useRef(null);
   const renkoOverlayRef = useRef(null);
   const campaignExitMarkerRef = useRef(null);
   const markersPluginRef = useRef(null);
+  const onBrickClickRef = useRef(onBrickClick);
+  const onHaSelectionChangeRef = useRef(onHaSelectionChange);
   const sliderRef = useRef(null);
   const sliderStartTextRef = useRef(null);
   const sliderEndTextRef = useRef(null);
@@ -891,11 +909,21 @@ export default function ChartComponent({
   const [jumpError, setJumpError] = useState('');
   const [selectedMonthKey, setSelectedMonthKey] = useState(null);
   const [isDaySelectorOpen, setIsDaySelectorOpen] = useState(false);
+  // Bumped when the chart instance is (re)created so markers re-attach to the new series.
+  const [chartSyncKey, setChartSyncKey] = useState(0);
 
   const { formattedData, originalTimeByChartTime, barIndexByChartTime } = React.useMemo(
     () => formatChartData(data),
     [data]
   );
+
+  useEffect(() => {
+    onBrickClickRef.current = onBrickClick;
+  }, [onBrickClick]);
+
+  useEffect(() => {
+    onHaSelectionChangeRef.current = onHaSelectionChange;
+  }, [onHaSelectionChange]);
 
   const navigationTree = React.useMemo(() => {
     return getNavigationTree(formattedData);
@@ -1053,6 +1081,14 @@ export default function ChartComponent({
     if (Number.isInteger(previousSession)) goToBarIndex(previousSession);
   };
 
+  const handleGoToNextSession = () => {
+    const sessionOpens = getSessionOpenIndices(data || []);
+    const anchorIndex = getNavigationAnchorIndex();
+    const currentPosition = sessionOpens.findLastIndex(index => index <= anchorIndex);
+    const nextSession = sessionOpens[currentPosition + 1];
+    if (Number.isInteger(nextSession)) goToBarIndex(nextSession);
+  };
+
   const handleZoomIn = () => {
     const chart = chartRef.current;
     if (!chart) return;
@@ -1200,6 +1236,7 @@ export default function ChartComponent({
       item.ema,
       item.ema5,
       item.ema10,
+      item.ema24,
       item.ma1,
       item.ma2,
     ]).filter(Number.isFinite);
@@ -1542,11 +1579,13 @@ export default function ChartComponent({
       item.low,
       item.ema5 ?? item.ema ?? item.low,
       item.ema10 ?? item.low,
+      item.ema24 ?? item.low,
     ]));
     const initialMaxPrice = Math.max(...initialPriceWindow.flatMap(item => [
       item.high,
       item.ema5 ?? item.ema ?? item.high,
       item.ema10 ?? item.high,
+      item.ema24 ?? item.high,
     ]));
     const minimumVisibleBricks = 18;
     const lockedPriceSpan = Math.max(inferredBrickSize * minimumVisibleBricks, initialMaxPrice - initialMinPrice);
@@ -1588,12 +1627,13 @@ export default function ChartComponent({
     const candlestickSeries = chart.addSeries(CandlestickSeries, candlestickSeriesOptions);
     candlestickSeriesRef.current = candlestickSeries;
 
-    // Add Line Series (5 EMA yellow, 10 EMA green to match MultiCharts)
+    // Add Line Series (exported EMA yellow, optional 10 EMA green, computed 24 EMA magenta)
     const ema5Series = chart.addSeries(LineSeries, {
       color: '#ffd400',
       lineWidth: 2,
       priceLineVisible: false,
       autoscaleInfoProvider: () => null,
+      title: 'EMA',
     });
     ema5SeriesRef.current = ema5Series;
 
@@ -1602,8 +1642,18 @@ export default function ChartComponent({
       lineWidth: 2,
       priceLineVisible: false,
       autoscaleInfoProvider: () => null,
+      title: '10 EMA',
     });
     ema10SeriesRef.current = ema10Series;
+
+    const ema24Series = chart.addSeries(LineSeries, {
+      color: '#c026d3',
+      lineWidth: 2,
+      priceLineVisible: false,
+      autoscaleInfoProvider: () => null,
+      title: '24 EMA',
+    });
+    ema24SeriesRef.current = ema24Series;
 
     // Populate Candlestick Series
     const candleData = formattedData.map(d => ({
@@ -1664,6 +1714,23 @@ export default function ChartComponent({
         value: d.ema10,
       }));
     ema10Series.setData(ema10Data);
+
+    // Compute 24 EMA from closes (not in export) so it overlays every dataset
+    const ema24Values = computeEmaSeries(formattedData, 24);
+    const ema24Data = formattedData
+      .map((d, index) => ({
+        time: d.time,
+        value: d.ema24 ?? ema24Values[index],
+      }))
+      .filter(d => Number.isFinite(d.value));
+    ema24Series.setData(ema24Data);
+
+    // Keep computed values on bars for crosshair / selection helpers
+    formattedData.forEach((bar, index) => {
+      if (!Number.isFinite(bar.ema24) && Number.isFinite(ema24Values[index])) {
+        bar.ema24 = ema24Values[index];
+      }
+    });
 
     // Set initial visible range (show last 150 bars to be zoomed in and readable)
     const totalBars = formattedData.length;
@@ -1770,7 +1837,7 @@ export default function ChartComponent({
             const rect = chartContainerRef.current.getBoundingClientRect();
             const viewportX = rect.left + param.point.x;
             const viewportY = rect.top + param.point.y;
-            onBrickClick(clickedBrick, { x: viewportX, y: viewportY });
+            onBrickClickRef.current?.(clickedBrick, { x: viewportX, y: viewportY });
           }
         }
       }
@@ -1786,6 +1853,9 @@ export default function ChartComponent({
       }
     };
     window.addEventListener('resize', handleResize);
+
+    // Let the markers effect re-bind to this new series instance.
+    setChartSyncKey(key => key + 1);
 
     return () => {
       window.removeEventListener('resize', handleResize);
@@ -1983,26 +2053,9 @@ export default function ChartComponent({
   }, [secondaryData, hasSecondaryPane]);
 
   useEffect(() => {
-    const virtualBricks = (annotations || [])
-      .filter(annotation =>
-        annotation.signalSet === 3 &&
-        annotation.setupType === 'synthetic' &&
-        Number.isInteger(annotation.entryBarIndex) &&
-        Number.isFinite(annotation.virtualBrick?.open) &&
-        Number.isFinite(annotation.virtualBrick?.close)
-      )
-      .map(annotation => ({
-        barIndex: annotation.entryBarIndex,
-        action: annotation.action,
-        open: annotation.virtualBrick.open,
-        close: annotation.virtualBrick.close,
-        label: '',
-      }));
-    const aridELabels = [];
-    const teachLabels = [];
-    renkoOverlayRef.current?.updateVirtualBricks(virtualBricks);
-    renkoOverlayRef.current?.updateAridELabels(aridELabels);
-    renkoOverlayRef.current?.updateTeachLabels(teachLabels);
+    renkoOverlayRef.current?.updateVirtualBricks([]);
+    renkoOverlayRef.current?.updateAridELabels([]);
+    renkoOverlayRef.current?.updateTeachLabels([]);
   }, [annotations, data]);
 
   useEffect(() => {
@@ -2028,40 +2081,25 @@ export default function ChartComponent({
     }
   }, [bookmark, data]);
 
-  // Synchronize Markers (Annotations) whenever annotations or data updates
+  // Synchronize Markers (Annotations) whenever annotations/data update, the chart
+  // is recreated, or the visible window jumps (Previous/Next Session, slider, etc.).
   useEffect(() => {
-    if (!candlestickSeriesRef.current || !data || data.length === 0) return;
+    if (!candlestickSeriesRef.current || !data || data.length === 0 || !formattedData.length) return;
 
-    // Recalculate formatted times mapping to map database ISO times back to chart unix times
-    let lastTime = 0;
-    const formattedBars = [];
-    const timeMapping = {}; // ISO String -> Unix Timestamp (legacy fallback)
-    data.forEach((item, index) => {
-      // Append 'Z' to treat the date as UTC and match the price series timestamps
-      let t = Math.floor(Date.parse(item.time + 'Z') / 1000);
-      if (isNaN(t)) {
-        t = lastTime + 1;
-      }
-      if (t <= lastTime) {
-        t = lastTime + 1;
-      }
-      lastTime = t;
-      timeMapping[item.time] = t;
-      formattedBars.push({
-        ...item,
-        originalIndex: index,
-        chartTime: t,
-      });
+    const timeMapping = {};
+    formattedData.forEach(bar => {
+      timeMapping[bar.originalTime] = bar.time;
     });
+    const brickSize = inferBrickSize(formattedData);
 
     const resolveAnnotationTime = (ann) => {
-      if (Number.isInteger(ann.barIndex) && formattedBars[ann.barIndex]) {
-        return formattedBars[ann.barIndex].chartTime;
+      if (Number.isInteger(ann.barIndex) && formattedData[ann.barIndex]) {
+        return formattedData[ann.barIndex].time;
       }
 
-      const candidates = formattedBars.filter(bar => bar.time === ann.timestamp);
+      const candidates = formattedData.filter(bar => bar.originalTime === ann.timestamp || bar.time === ann.timestamp);
       if (candidates.length === 0) return timeMapping[ann.timestamp];
-      if (!ann.metrics) return candidates[candidates.length - 1].chartTime;
+      if (!ann.metrics) return candidates[candidates.length - 1].time;
 
       const metricKeys = ['open', 'high', 'low', 'close', 'ema'];
       const bestMatch = candidates.reduce((best, candidate) => {
@@ -2075,51 +2113,50 @@ export default function ChartComponent({
         return !best || score < best.score ? { candidate, score } : best;
       }, null);
 
-      return bestMatch?.candidate.chartTime;
+      return bestMatch?.candidate.time;
     };
 
-    // Build Chart Markers
-    const markers = [];
-    const campaignExitMarkers = [];
-    if (annotations && annotations.length > 0) {
-      annotations.forEach(ann => {
-        const chartTime = resolveAnnotationTime(ann);
-        if (chartTime) {
-          if (ann.isYellowMomentumCampaignEntry) {
-            markers.push({
-              time: chartTime,
-              position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
-              color: '#eab308',
-              shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
-              text: '',
-            });
-          } else if (ann.isYellowMomentumCampaignExit) {
-            const profit = Number(ann.profitBricks);
-            markers.push({
-              time: chartTime,
-              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar',
-              color: Number.isFinite(profit) && profit >= 0 ? '#22c55e' : '#ef4444',
-              shape: 'square',
-              text: '',
-            });
-          } else if (ann.isEmaBounceCampaignEntry) {
-            markers.push({
-              time: chartTime,
-              position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
-              color: ann.action === 'Buy' ? '#06b6d4' : '#f97316',
-              shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
-              text: '',
-            });
-          } else if (ann.isEmaBounceCampaignExit) {
-            const profit = Number(ann.profitBricks);
-            markers.push({
-              time: chartTime,
-              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar',
-              color: Number.isFinite(profit) && profit >= 0 ? '#16a34a' : '#dc2626',
-              shape: 'square',
-              text: '',
-            });
-          } else if (ann.isMesReg5RecoveryCampaignEntry) {
+    const WINDOW_PAD = 150;
+    const MOVE_THRESHOLD = 50;
+    let lastWindow = { from: -999999, to: -999999 };
+
+    const applyMarkersForVisibleRange = (force = false) => {
+      if (!candlestickSeriesRef.current) return;
+
+      const range = chartRef.current?.timeScale().getVisibleLogicalRange();
+      let minIdx = 0;
+      let maxIdx = formattedData.length - 1;
+      if (range) {
+        minIdx = Math.max(0, Math.floor(range.from) - WINDOW_PAD);
+        maxIdx = Math.min(formattedData.length - 1, Math.ceil(range.to) + WINDOW_PAD);
+      }
+
+      if (
+        !force &&
+        Math.abs(minIdx - lastWindow.from) < MOVE_THRESHOLD &&
+        Math.abs(maxIdx - lastWindow.to) < MOVE_THRESHOLD
+      ) {
+        return;
+      }
+      lastWindow = { from: minIdx, to: maxIdx };
+
+      const markers = [];
+      const campaignExitMarkers = [];
+      if (annotations && annotations.length > 0) {
+        annotations.forEach(ann => {
+          if (Number.isInteger(ann.barIndex) && (ann.barIndex < minIdx || ann.barIndex > maxIdx)) {
+            return;
+          }
+
+          const chartTime = resolveAnnotationTime(ann);
+          if (!chartTime) return;
+
+          const entryIndex = barIndexByChartTime.get(chartTime);
+          const outcome = (ann.action === 'Buy' || ann.action === 'Sell')
+            ? getAnnotationOutcome(ann.action, entryIndex, formattedData, brickSize)
+            : null;
+
+          if (ann.isMesReg5RecoveryCampaignEntry) {
             markers.push({
               time: chartTime,
               position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
@@ -2177,48 +2214,47 @@ export default function ChartComponent({
             markers.push({
               time: chartTime,
               position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
-              color: ann.action === 'Buy' ? '#1d4ed8' : '#a21caf', // Dark Royal Blue for Buy, Dark Magenta for Sell
+              color: ann.action === 'Buy' ? '#1d4ed8' : '#a21caf',
               shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
               text: '',
             });
           } else if (ann.isCampaignExit) {
-            let color = '#475569'; // Dark Slate for BE/End
+            let color = '#475569';
             let shape = 'circle';
-            let label = `EXIT #${ann.tradeIndex}`;
-            
+
             if (ann.exitResult === 'Win') {
-              const profit = Number(ann.profitBricks) !== undefined && Number.isFinite(ann.profitBricks) ? Number(ann.profitBricks) : 2.0;
-              const profitStr = profit >= 0 ? `+${profit.toFixed(1)}` : profit.toFixed(1);
-              color = '#15803d'; // Dark Forest Green
+              color = '#15803d';
               shape = 'square';
-              label = `🏆 WIN #${ann.tradeIndex} (${profitStr})`;
             } else if (ann.exitResult === 'Loss') {
-              const profit = Number(ann.profitBricks) !== undefined && Number.isFinite(ann.profitBricks) ? Number(ann.profitBricks) : -2.0;
-              const profitStr = profit >= 0 ? `+${profit.toFixed(1)}` : profit.toFixed(1);
-              color = '#b91c1c'; // Dark Crimson Red
+              color = '#b91c1c';
               shape = 'square';
-              label = `❌ LOSS #${ann.tradeIndex} (${profitStr})`;
             } else if (ann.exitResult === 'BE') {
-              color = '#475569'; // Dark Slate Gray
+              color = '#475569';
               shape = 'circle';
-              label = `🤝 BE #${ann.tradeIndex}`;
             } else if (ann.exitResult === 'Trail') {
               const profit = Number(ann.profitBricks) || 0;
-              const profitStr = profit >= 0 ? `+${profit.toFixed(1)}` : profit.toFixed(1);
               color = profit >= 0 ? '#15803d' : '#b91c1c';
               shape = 'square';
-              label = `🏃 TRAIL #${ann.tradeIndex} (${profitStr})`;
             } else if (ann.exitResult === 'EndSession') {
               color = '#475569';
               shape = 'circle';
-              label = `🚪 END #${ann.tradeIndex}`;
             }
-            
+
             markers.push({
               time: chartTime,
-              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar', // Exit is opposite to entry direction
+              position: ann.direction === 'Buy' ? 'aboveBar' : 'belowBar',
               color: color,
               shape: shape,
+              text: '',
+            });
+          } else if (outcome) {
+            markers.push({
+              time: chartTime,
+              position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
+              color: outcome === 'success' ? '#16a34a' : '#dc2626',
+              shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
+              size: 3,
+              preserveColor: true,
               text: '',
             });
           } else if (ann.markerSet === 'Raw Range Bar Set' && ann.action === 'Buy') {
@@ -2236,6 +2272,26 @@ export default function ChartComponent({
               color: '#b00020',
               shape: 'arrowDown',
               text: '',
+            });
+          } else if (ann.isProjection && ann.action === 'Buy') {
+            markers.push({
+              time: chartTime,
+              position: 'belowBar',
+              color: '#22d3ee',
+              shape: 'arrowUp',
+              size: 1,
+              preserveColor: true,
+              text: 'P',
+            });
+          } else if (ann.isProjection && ann.action === 'Sell') {
+            markers.push({
+              time: chartTime,
+              position: 'aboveBar',
+              color: '#fb923c',
+              shape: 'arrowDown',
+              size: 1,
+              preserveColor: true,
+              text: 'P',
             });
           } else if (ann.action === 'Buy') {
             if (ann.signalSet === 6) {
@@ -2278,24 +2334,13 @@ export default function ChartComponent({
               });
               return;
             }
-            if (ann.signalSet === 3) {
-              if (ann.setupType === 'synthetic') return;
-              markers.push({
-                time: chartTime,
-                position: 'belowBar',
-                color: '#004cff',
-                shape: 'arrowUp',
-                text: '',
-              });
-              return;
-            }
 
             markers.push({
               time: chartTime,
               position: 'belowBar',
-              color: '#004cff', // Pure Up-bar hue for shape
+              color: '#004cff',
               shape: 'arrowUp',
-              text: '', // No text for generated signal or built-in TEACH marker
+              text: '',
             });
           } else if (ann.action === 'Sell') {
             if (ann.signalSet === 6) {
@@ -2338,55 +2383,55 @@ export default function ChartComponent({
               });
               return;
             }
-            if (ann.signalSet === 3) {
-              if (ann.setupType === 'synthetic') return;
-              markers.push({
-                time: chartTime,
-                position: 'aboveBar',
-                color: '#cc1a1a',
-                shape: 'arrowDown',
-                text: '',
-              });
-              return;
-            }
 
             markers.push({
               time: chartTime,
               position: 'aboveBar',
-              color: '#cc1a1a', // Pure Down-bar hue for shape
+              color: '#cc1a1a',
               shape: 'arrowDown',
-              text: '', // No text for generated signal or built-in TEACH marker
+              text: '',
             });
           } else if (ann.action === 'Skip') {
             markers.push({
               time: chartTime,
               position: 'aboveBar',
-              color: '#000000', // Black shape
+              color: '#000000',
               shape: 'circle',
-              text: '', // No text for built-in TEACH marker
+              text: '',
             });
           }
-        }
-      });
-    }
-
-    markers.sort((a, b) => a.time - b.time);
-
-    const finalMarkers = markers.map(m => {
-      if (!m.preserveColor && (m.shape === 'arrowUp' || m.shape === 'arrowDown')) {
-        return { ...m, color: '#000000' };
+        });
       }
-      return m;
-    });
 
-    campaignExitMarkerRef.current?.updateMarkers(campaignExitMarkers);
+      markers.sort((a, b) => a.time - b.time);
 
-    if (!markersPluginRef.current) {
-      markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, finalMarkers);
-    } else {
-      markersPluginRef.current.setMarkers(finalMarkers);
-    }
-  }, [annotations, data]);
+      const finalMarkers = markers.map(m => {
+        if (!m.preserveColor && (m.shape === 'arrowUp' || m.shape === 'arrowDown')) {
+          return { ...m, color: '#000000' };
+        }
+        return m;
+      });
+
+      campaignExitMarkerRef.current?.updateMarkers(campaignExitMarkers);
+
+      if (!markersPluginRef.current) {
+        markersPluginRef.current = createSeriesMarkers(candlestickSeriesRef.current, finalMarkers);
+      } else {
+        markersPluginRef.current.setMarkers(finalMarkers);
+      }
+    };
+
+    applyMarkersForVisibleRange(true);
+
+    const chart = chartRef.current;
+    if (!chart) return undefined;
+
+    const handleRangeChange = () => applyMarkersForVisibleRange(false);
+    chart.timeScale().subscribeVisibleLogicalRangeChange(handleRangeChange);
+    return () => {
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(handleRangeChange);
+    };
+  }, [annotations, data, formattedData, barIndexByChartTime, chartSyncKey]);
 
   return (
     <div className="chart-wrapper" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -2647,9 +2692,16 @@ export default function ChartComponent({
           <button
             onClick={handleGoToPreviousSession}
             className="control-btn"
-            title="Go to the previous trading session open"
+            title="Go to the previous trading session open (06:30)"
           >
             Previous Session
+          </button>
+          <button
+            onClick={handleGoToNextSession}
+            className="control-btn"
+            title="Go to the next trading session open (06:30)"
+          >
+            Next Session
           </button>
           <button
             onClick={handleGoToSessionOpen}
