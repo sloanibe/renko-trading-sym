@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createChart, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
-import { getAnnotationOutcome, inferBrickSize } from './annotationOutcomes';
+import {
+  buildSessionCumulativeOutcomes,
+  inferBrickSize,
+  inferTickSize,
+} from './annotationOutcomes';
 
 const SESSION_OPEN_TIME = '06:30:00';
 
@@ -240,6 +244,25 @@ const formatOriginalChartTime = (chartTime, originalTimeByChartTime, includeDate
 const parseOriginalTimeMs = (originalTime) => {
   if (!originalTime) return NaN;
   return Date.parse(originalTime.endsWith('Z') ? originalTime : `${originalTime}Z`);
+};
+
+const isManualOutcomeSignal = (annotation) => {
+  if (annotation.action !== 'Buy' && annotation.action !== 'Sell') return false;
+
+  return ![
+    'isProjection',
+    'isCampaignEntry',
+    'isCampaignExit',
+    'isMesReg5RecoveryCampaignEntry',
+    'isMesReg5RecoveryCampaignSkip',
+    'isMesReg5RecoveryPaperEntry',
+    'isMesReg5RecoveryPaperExit',
+    'isMesReg5RecoveryCampaignExit',
+    'isYellowMomentumCampaignEntry',
+    'isYellowMomentumCampaignExit',
+    'isEmaBounceCampaignEntry',
+    'isEmaBounceCampaignExit',
+  ].some(flag => annotation[flag]);
 };
 
 const formatSelectionTime = (originalTime) => {
@@ -854,6 +877,158 @@ class CampaignExitMarkerRenderer {
   }
 }
 
+class CumulativeOutcomeLabelPrimitive {
+  constructor(data, labels = []) {
+    this._data = data;
+    this._labels = labels;
+    this._chart = null;
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  attached(param) {
+    this._chart = param.chart;
+    this._series = param.series;
+    this._requestUpdate = param.requestUpdate;
+  }
+
+  detached() {
+    this._chart = null;
+    this._series = null;
+    this._requestUpdate = null;
+  }
+
+  updateLabels(labels) {
+    this._labels = labels || [];
+    this._requestUpdate?.();
+  }
+
+  paneViews() {
+    return [new CumulativeOutcomeLabelPaneView(this)];
+  }
+}
+
+class CumulativeOutcomeLabelPaneView {
+  constructor(primitive) {
+    this._primitive = primitive;
+  }
+
+  zOrder() {
+    return 'top';
+  }
+
+  renderer() {
+    return new CumulativeOutcomeLabelRenderer(this._primitive);
+  }
+}
+
+class CumulativeOutcomeLabelRenderer {
+  constructor(primitive) {
+    this._primitive = primitive;
+  }
+
+  draw(target) {
+    const { _chart: chart, _series: series, _data: data, _labels: labels } = this._primitive;
+    if (!chart || !series || !data?.length || !labels?.length) return;
+
+    const visibleRange = chart.timeScale().getVisibleLogicalRange();
+    const firstVisibleIndex = visibleRange ? Math.max(0, Math.floor(visibleRange.from) - 2) : 0;
+    const lastVisibleIndex = visibleRange
+      ? Math.min(data.length - 1, Math.ceil(visibleRange.to) + 2)
+      : data.length - 1;
+
+    target.useBitmapCoordinateSpace((scope) => {
+      const ctx = scope.context;
+      const hRatio = scope.horizontalPixelRatio;
+      const vRatio = scope.verticalPixelRatio;
+      const labelGap = 24 * vRatio;
+
+      ctx.fillStyle = '#000000';
+      ctx.font = `600 ${10 * vRatio}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+
+      labels.forEach((label) => {
+        if (label.barIndex < firstVisibleIndex || label.barIndex > lastVisibleIndex) return;
+
+        const bar = data[label.barIndex];
+        if (!bar) return;
+        const xCoordinate = chart.timeScale().timeToCoordinate(bar.time);
+        const priceY = series.priceToCoordinate(label.action === 'Buy' ? bar.low : bar.high);
+        if (xCoordinate === null || priceY === null) return;
+
+        const isBuy = label.action === 'Buy';
+        const cumulativeText = label.outcome === 'ignored'
+          ? 'IGN'
+          : label.outcome === 'pending'
+            ? '...'
+            : label.outcome === 'ambiguous'
+              ? '?'
+              : `${label.cumulativeTicks >= 0 ? '+' : ''}${label.cumulativeTicks}`;
+        ctx.textBaseline = isBuy ? 'top' : 'bottom';
+        ctx.fillText(
+          cumulativeText,
+          xCoordinate * hRatio,
+          (priceY * vRatio) + (isBuy ? labelGap : -labelGap)
+        );
+      });
+
+      const exitReasonLabels = {
+        target: 'TGT',
+        stop: 'STOP',
+        'recovery-zero': 'R0',
+        'protected-breakeven': 'BE',
+        'session-end': 'END',
+        ambiguous: 'AMB',
+      };
+
+      labels.forEach((label) => {
+        if (!Number.isInteger(label.exitBarIndex)) return;
+        if (label.exitBarIndex < firstVisibleIndex || label.exitBarIndex > lastVisibleIndex) return;
+
+        const exitBar = data[label.exitBarIndex];
+        if (!exitBar) return;
+        const xCoordinate = chart.timeScale().timeToCoordinate(exitBar.time);
+        const markerPrice = Number.isFinite(label.exitPrice)
+          ? label.exitPrice
+          : (Number(exitBar.high) + Number(exitBar.low)) / 2;
+        const yCoordinate = series.priceToCoordinate(markerPrice);
+        if (xCoordinate === null || yCoordinate === null) return;
+
+        const x = xCoordinate * hRatio;
+        const y = yCoordinate * vRatio;
+        const arrowLength = 9 * hRatio;
+        const arrowHeight = 4 * vRatio;
+        const reason = exitReasonLabels[label.exitReason] || label.exitReason;
+
+        ctx.strokeStyle = '#000000';
+        ctx.fillStyle = '#000000';
+        ctx.lineWidth = Math.max(1, Math.min(hRatio, vRatio));
+
+        if (label.isIntrabarExit) {
+          ctx.beginPath();
+          ctx.moveTo(x - arrowLength, y);
+          ctx.lineTo(x + arrowLength, y);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x + arrowLength, y);
+          ctx.lineTo(x + arrowLength - 5 * hRatio, y - arrowHeight);
+          ctx.lineTo(x + arrowLength - 5 * hRatio, y + arrowHeight);
+          ctx.closePath();
+          ctx.fill();
+        } else {
+          const squareSize = 5 * Math.min(hRatio, vRatio);
+          ctx.fillRect(x - squareSize / 2, y - squareSize / 2, squareSize, squareSize);
+        }
+
+        ctx.font = `600 ${9 * vRatio}px Inter, system-ui, sans-serif`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(reason, x + 13 * hRatio, y);
+      });
+    });
+  }
+}
+
 
 export default function ChartComponent({
   data,
@@ -882,6 +1057,7 @@ export default function ChartComponent({
   const secondaryMa2SeriesRef = useRef(null);
   const renkoOverlayRef = useRef(null);
   const campaignExitMarkerRef = useRef(null);
+  const cumulativeOutcomeLabelRef = useRef(null);
   const markersPluginRef = useRef(null);
   const onBrickClickRef = useRef(onBrickClick);
   const onHaSelectionChangeRef = useRef(onHaSelectionChange);
@@ -1697,6 +1873,9 @@ export default function ChartComponent({
     });
     candlestickSeries.attachPrimitive(campaignExitMarker);
     campaignExitMarkerRef.current = campaignExitMarker;
+    const cumulativeOutcomeLabel = new CumulativeOutcomeLabelPrimitive(formattedData);
+    candlestickSeries.attachPrimitive(cumulativeOutcomeLabel);
+    cumulativeOutcomeLabelRef.current = cumulativeOutcomeLabel;
 
     // Populate EMA Series
     const ema5Data = formattedData
@@ -1868,6 +2047,7 @@ export default function ChartComponent({
       markersPluginRef.current = null;
       renkoOverlayRef.current = null;
       campaignExitMarkerRef.current = null;
+      cumulativeOutcomeLabelRef.current = null;
       primaryFormattedDataRef.current = [];
       primaryBarByChartTimeRef.current = new Map();
     };
@@ -2116,6 +2296,29 @@ export default function ChartComponent({
       return bestMatch?.candidate.time;
     };
 
+    const tradeEvaluations = buildSessionCumulativeOutcomes(
+      (annotations || [])
+        .map((ann, annotationIndex) => {
+          const chartTime = resolveAnnotationTime(ann);
+          return {
+            ...ann,
+            annotationIndex,
+            barIndex: Number.isInteger(ann.barIndex)
+              ? ann.barIndex
+              : barIndexByChartTime.get(chartTime),
+          };
+        })
+        .filter(isManualOutcomeSignal),
+      formattedData,
+      brickSize,
+      inferTickSize(formattedData),
+      getSessionOpenIndices(data)
+    );
+    const tradeEvaluationByAnnotationIndex = new Map(
+      tradeEvaluations.map(evaluation => [evaluation.annotationIndex, evaluation])
+    );
+    cumulativeOutcomeLabelRef.current?.updateLabels(tradeEvaluations);
+
     const WINDOW_PAD = 150;
     const MOVE_THRESHOLD = 50;
     let lastWindow = { from: -999999, to: -999999 };
@@ -2143,7 +2346,7 @@ export default function ChartComponent({
       const markers = [];
       const campaignExitMarkers = [];
       if (annotations && annotations.length > 0) {
-        annotations.forEach(ann => {
+        annotations.forEach((ann, annotationIndex) => {
           if (Number.isInteger(ann.barIndex) && (ann.barIndex < minIdx || ann.barIndex > maxIdx)) {
             return;
           }
@@ -2151,10 +2354,7 @@ export default function ChartComponent({
           const chartTime = resolveAnnotationTime(ann);
           if (!chartTime) return;
 
-          const entryIndex = barIndexByChartTime.get(chartTime);
-          const outcome = (ann.action === 'Buy' || ann.action === 'Sell')
-            ? getAnnotationOutcome(ann.action, entryIndex, formattedData, brickSize)
-            : null;
+          const tradeEvaluation = tradeEvaluationByAnnotationIndex.get(annotationIndex);
 
           if (ann.isMesReg5RecoveryCampaignEntry) {
             markers.push({
@@ -2247,11 +2447,19 @@ export default function ChartComponent({
               shape: shape,
               text: '',
             });
-          } else if (outcome) {
+          } else if (tradeEvaluation) {
+            const outcomeColors = {
+              success: '#16a34a',
+              failure: '#dc2626',
+              breakeven: '#374151',
+              ambiguous: '#d97706',
+              ignored: '#64748b',
+              pending: '#000000',
+            };
             markers.push({
               time: chartTime,
               position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
-              color: outcome === 'success' ? '#16a34a' : '#dc2626',
+              color: outcomeColors[tradeEvaluation.outcome] || '#000000',
               shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
               size: 3,
               preserveColor: true,
