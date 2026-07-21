@@ -41,9 +41,9 @@ test('Sell fails only when ten ticks above entry is reached first', () => {
   assert.equal(getAnnotationOutcome('Sell', 0, bars, 1.25), 'failure');
 });
 
-test('does not score an OHLC bar that reaches both thresholds', () => {
+test('uses the favorable-first assumption when one bar reaches both thresholds', () => {
   const bars = [entry, bar(101.25, 97.5)];
-  assert.equal(getAnnotationOutcome('Buy', 0, bars, 1.25), null);
+  assert.equal(getAnnotationOutcome('Buy', 0, bars, 1.25), 'success');
 });
 
 test('accumulates five-tick wins and ten-tick losses, resetting at session opens', () => {
@@ -119,6 +119,93 @@ test('recovery trade exits at trade break-even after first reaching five ticks',
   assert.equal(outcomes[1].cumulativeTicks, -10);
 });
 
+test('armed Buy recovery exits profitably at the first opposite-color close', () => {
+  const bars = [
+    { open: 100, high: 100.5, low: 99.25, close: 100 },
+    { open: 100, high: 100.5, low: 97.5, close: 98 }, // first Buy: -10
+    { open: 99.5, high: 100.5, low: 99.25, close: 100 }, // recovery Buy entry
+    // The low touches entry inside the arm bar, but the bar finishes at +5.
+    // Best-case ordering treats that low as occurring before the favorable run.
+    { open: 100.25, high: 101.25, low: 100, close: 101.25 },
+    { open: 101.25, high: 101.5, low: 100.5, close: 100.75 }, // red close at +3
+  ];
+  const outcomes = buildSessionCumulativeOutcomes(
+    [{ action: 'Buy', barIndex: 0 }, { action: 'Buy', barIndex: 2 }],
+    bars,
+    1.25,
+    0.25,
+    [0]
+  );
+
+  assert.equal(outcomes[1].exitReason, 'opposite-close');
+  assert.equal(outcomes[1].exitPrice, 100.75);
+  assert.equal(outcomes[1].profitTicks, 3);
+  assert.equal(outcomes[1].cumulativeTicks, -7);
+  assert.equal(outcomes[1].isIntrabarExit, false);
+});
+
+test('armed recovery break-even touch takes priority over a later opposite-color close', () => {
+  const bars = [
+    { open: 100, high: 100.5, low: 99.25, close: 100 },
+    { open: 100, high: 100.5, low: 97.5, close: 98 },
+    { open: 99.5, high: 100.5, low: 99.25, close: 100 },
+    { open: 100, high: 101.25, low: 100, close: 101.25 },
+    { open: 101.25, high: 101.5, low: 100, close: 100.75 },
+  ];
+  const outcomes = buildSessionCumulativeOutcomes(
+    [{ action: 'Buy', barIndex: 0 }, { action: 'Buy', barIndex: 2 }],
+    bars,
+    1.25,
+    0.25,
+    [0]
+  );
+
+  assert.equal(outcomes[1].exitReason, 'protected-breakeven');
+  assert.equal(outcomes[1].profitTicks, 0);
+  assert.equal(outcomes[1].cumulativeTicks, -10);
+});
+
+test('same-bar recovery conflicts follow the favorable-first state transition', () => {
+  const bars = [
+    { open: 100, high: 100.5, low: 99.25, close: 100 },
+    { open: 100, high: 100.5, low: 97.5, close: 98 }, // first Buy: -10
+    { open: 99.5, high: 100.5, low: 99.25, close: 100 }, // recovery entry
+    { open: 100, high: 101.25, low: 97.5, close: 98 }, // +5 and -10 in one bar
+  ];
+  const outcomes = buildSessionCumulativeOutcomes(
+    [{ action: 'Buy', barIndex: 0 }, { action: 'Buy', barIndex: 2 }],
+    bars,
+    1.25,
+    0.25,
+    [0]
+  );
+
+  assert.equal(outcomes[1].exitReason, 'protected-breakeven');
+  assert.equal(outcomes[1].profitTicks, 0);
+  assert.equal(outcomes[1].cumulativeTicks, -10);
+});
+
+test('armed Sell recovery uses the first blue close and its actual profit', () => {
+  const bars = [
+    { open: 100, high: 100.75, low: 99.5, close: 100 },
+    { open: 100, high: 102.5, low: 99.5, close: 102 }, // first Sell: -10
+    { open: 100.5, high: 100.75, low: 99.5, close: 100 }, // recovery Sell entry
+    { open: 100, high: 100, low: 98.75, close: 98.75 }, // arm at +5
+    { open: 98.75, high: 99.5, low: 98.5, close: 99.25 }, // blue close at +3
+  ];
+  const outcomes = buildSessionCumulativeOutcomes(
+    [{ action: 'Sell', barIndex: 0 }, { action: 'Sell', barIndex: 2 }],
+    bars,
+    1.25,
+    0.25,
+    [0]
+  );
+
+  assert.equal(outcomes[1].exitReason, 'opposite-close');
+  assert.equal(outcomes[1].profitTicks, 3);
+  assert.equal(outcomes[1].cumulativeTicks, -7);
+});
+
 test('a five-tick recovery target takes priority when the deficit is five ticks', () => {
   const bars = [
     { open: 100, high: 100.5, low: 99.25, close: 100 },
@@ -168,7 +255,7 @@ test('closes an open trade at the last close before a new session and resets aft
   assert.equal(outcomes[1].cumulativeTicks, 5);
 });
 
-test('flags overlapping signals and same-bar threshold ambiguity without changing P&L', () => {
+test('flags overlapping signals and scores same-bar conflicts favorable-first', () => {
   const overlapBars = [
     { open: 100, high: 100.5, low: 99.25, close: 100 },
     { open: 100, high: 100.75, low: 99.5, close: 100.5 },
@@ -184,14 +271,14 @@ test('flags overlapping signals and same-bar threshold ambiguity without changin
   assert.equal(overlap[1].exitReason, 'overlap-ignored');
   assert.equal(overlap[1].profitTicks, null);
 
-  const ambiguousBars = [entry, bar(101.25, 97.5)];
-  const ambiguous = buildSessionCumulativeOutcomes(
+  const sameBarConflictBars = [entry, bar(101.25, 97.5)];
+  const favorableFirst = buildSessionCumulativeOutcomes(
     [{ action: 'Buy', barIndex: 0 }],
-    ambiguousBars,
+    sameBarConflictBars,
     1.25,
     0.25,
     [0]
   );
-  assert.equal(ambiguous[0].exitReason, 'ambiguous');
-  assert.equal(ambiguous[0].cumulativeTicks, 0);
+  assert.equal(favorableFirst[0].exitReason, 'target');
+  assert.equal(favorableFirst[0].cumulativeTicks, 5);
 });

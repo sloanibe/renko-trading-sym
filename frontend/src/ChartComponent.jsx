@@ -7,6 +7,24 @@ import {
 } from './annotationOutcomes';
 
 const SESSION_OPEN_TIME = '06:30:00';
+const OUTCOME_MARKER_COLORS = {
+  success: '#16a34a',
+  failure: '#dc2626',
+  breakeven: '#111827',
+  ignored: '#64748b',
+  pending: '#111827',
+};
+
+const getOutcomeMarkerColor = outcome => OUTCOME_MARKER_COLORS[outcome] || '#111827';
+
+const getContrastingTextColor = (hexColor) => {
+  const hex = hexColor.replace('#', '');
+  const red = parseInt(hex.slice(0, 2), 16) / 255;
+  const green = parseInt(hex.slice(2, 4), 16) / 255;
+  const blue = parseInt(hex.slice(4, 6), 16) / 255;
+  const luminance = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+  return luminance < 0.55 ? '#ffffff' : '#000000';
+};
 
 const formatTimeLabel = (isoString) => {
   if (!isoString) return '';
@@ -943,7 +961,6 @@ class CumulativeOutcomeLabelRenderer {
       const vRatio = scope.verticalPixelRatio;
       const labelGap = 24 * vRatio;
 
-      ctx.fillStyle = '#000000';
       ctx.font = `600 ${10 * vRatio}px Inter, system-ui, sans-serif`;
       ctx.textAlign = 'center';
 
@@ -961,15 +978,23 @@ class CumulativeOutcomeLabelRenderer {
           ? 'IGN'
           : label.outcome === 'pending'
             ? '...'
-            : label.outcome === 'ambiguous'
-              ? '?'
-              : `${label.cumulativeTicks >= 0 ? '+' : ''}${label.cumulativeTicks}`;
-        ctx.textBaseline = isBuy ? 'top' : 'bottom';
-        ctx.fillText(
-          cumulativeText,
-          xCoordinate * hRatio,
-          (priceY * vRatio) + (isBuy ? labelGap : -labelGap)
-        );
+            : `${label.cumulativeTicks >= 0 ? '+' : ''}${label.cumulativeTicks}`;
+        const x = xCoordinate * hRatio;
+        const y = (priceY * vRatio) + (isBuy ? labelGap : -labelGap);
+        const backgroundColor = getOutcomeMarkerColor(label.outcome);
+        const textColor = getContrastingTextColor(backgroundColor);
+        const labelWidth = ctx.measureText(cumulativeText).width + 7 * hRatio;
+        const labelHeight = 14 * vRatio;
+
+        ctx.fillStyle = backgroundColor;
+        ctx.strokeStyle = textColor;
+        ctx.lineWidth = Math.max(1, Math.min(hRatio, vRatio));
+        ctx.fillRect(x - labelWidth / 2, y - labelHeight / 2, labelWidth, labelHeight);
+        ctx.strokeRect(x - labelWidth / 2, y - labelHeight / 2, labelWidth, labelHeight);
+
+        ctx.fillStyle = textColor;
+        ctx.textBaseline = 'middle';
+        ctx.fillText(cumulativeText, x, y + 0.5 * vRatio);
       });
 
       const exitReasonLabels = {
@@ -977,8 +1002,8 @@ class CumulativeOutcomeLabelRenderer {
         stop: 'STOP',
         'recovery-zero': 'R0',
         'protected-breakeven': 'BE',
+        'opposite-close': 'OPP',
         'session-end': 'END',
-        ambiguous: 'AMB',
       };
 
       labels.forEach((label) => {
@@ -2448,18 +2473,10 @@ export default function ChartComponent({
               text: '',
             });
           } else if (tradeEvaluation) {
-            const outcomeColors = {
-              success: '#16a34a',
-              failure: '#dc2626',
-              breakeven: '#374151',
-              ambiguous: '#d97706',
-              ignored: '#64748b',
-              pending: '#000000',
-            };
             markers.push({
               time: chartTime,
               position: ann.action === 'Buy' ? 'belowBar' : 'aboveBar',
-              color: outcomeColors[tradeEvaluation.outcome] || '#000000',
+              color: getOutcomeMarkerColor(tradeEvaluation.outcome),
               shape: ann.action === 'Buy' ? 'arrowUp' : 'arrowDown',
               size: 3,
               preserveColor: true,

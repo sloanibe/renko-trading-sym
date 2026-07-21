@@ -66,9 +66,9 @@ export const getAnnotationOutcome = (action, entryIndex, bars, brickSize) => {
       ? Number(bar.low) <= failurePrice
       : Number(bar.high) >= failurePrice;
 
-    // OHLC bars cannot reveal which threshold was hit first when both occur
-    // within the same bar, so leave that annotation unscored.
-    if (hitSuccess && hitFailure) return null;
+    // When both thresholds appear in one OHLC bar, assume the favorable move
+    // occurred first, per the strategy's best-case intrabar convention.
+    if (hitSuccess && hitFailure) return 'success';
     if (hitSuccess) return 'success';
     if (hitFailure) return 'failure';
   }
@@ -95,6 +95,12 @@ const hitsFavorablePrice = (bar, action, price) => (
 
 const hitsAdversePrice = (bar, action, price) => (
   action === 'Buy' ? Number(bar.low) <= price : Number(bar.high) >= price
+);
+
+const closesOppositeTradeDirection = (bar, action) => (
+  action === 'Buy'
+    ? Number(bar.close) < Number(bar.open)
+    : Number(bar.close) > Number(bar.open)
 );
 
 const closeTradeAtSessionEnd = (
@@ -139,24 +145,21 @@ const evaluateTrade = (
   const armPrice = getDirectionalPrice(entryPrice, annotation.action, ticksPerBrick, tickSize);
   let breakEvenArmed = false;
 
-  const completed = (exitBarIndex, exitPrice, exitReason, profitTicks, outcome) => ({
+  const completed = (
     exitBarIndex,
     exitPrice,
     exitReason,
-    isIntrabarExit: true,
+    profitTicks,
+    outcome,
+    isIntrabarExit = true
+  ) => ({
+    exitBarIndex,
+    exitPrice,
+    exitReason,
+    isIntrabarExit,
     outcome,
     profitTicks,
     cumulativeTicks: startingCumulativeTicks + profitTicks,
-  });
-
-  const ambiguous = (exitBarIndex) => ({
-    exitBarIndex,
-    exitPrice: null,
-    exitReason: 'ambiguous',
-    isIntrabarExit: true,
-    outcome: 'ambiguous',
-    profitTicks: null,
-    cumulativeTicks: startingCumulativeTicks,
   });
 
   for (let barIndex = annotation.barIndex + 1; barIndex <= sessionEndIndex; barIndex += 1) {
@@ -165,7 +168,6 @@ const evaluateTrade = (
     const hitTarget = hitsFavorablePrice(bar, annotation.action, targetPrice);
 
     if (!isRecoveryTrade) {
-      if (hitStop && hitTarget) return ambiguous(barIndex);
       if (hitTarget) {
         return completed(barIndex, targetPrice, 'target', ticksPerBrick, 'success');
       }
@@ -177,15 +179,11 @@ const evaluateTrade = (
 
     const hitArmPrice = hitsFavorablePrice(bar, annotation.action, armPrice);
     const hitEntryPrice = hitsAdversePrice(bar, annotation.action, entryPrice);
+    const oppositeColorClose = closesOppositeTradeDirection(bar, annotation.action);
 
     if (!breakEvenArmed) {
-      // If a single OHLC bar reaches both sides, its intrabar order is unknowable.
-      if (hitStop && (hitTarget || hitArmPrice)) return ambiguous(barIndex);
       if (hitTarget) {
         return completed(barIndex, targetPrice, 'recovery-zero', targetTicks, 'success');
-      }
-      if (hitStop) {
-        return completed(barIndex, stopPrice, 'stop', -stopTicks, 'failure');
       }
 
       if (hitArmPrice) {
@@ -195,28 +193,52 @@ const evaluateTrade = (
         if (closedBackThroughEntry) {
           return completed(barIndex, entryPrice, 'protected-breakeven', 0, 'breakeven');
         }
+        if (oppositeColorClose) {
+          const direction = annotation.action === 'Buy' ? 1 : -1;
+          const profitTicks = Math.round(
+            ((Number(bar.close) - entryPrice) * direction) / tickSize
+          );
+          return completed(
+            barIndex,
+            Number(bar.close),
+            'opposite-close',
+            profitTicks,
+            profitTicks > 0 ? 'success' : 'breakeven',
+            false
+          );
+        }
         breakEvenArmed = true;
+        continue;
+      }
+
+      if (hitStop) {
+        return completed(barIndex, stopPrice, 'stop', -stopTicks, 'failure');
       }
       continue;
     }
 
     if (hitTarget && hitEntryPrice) {
-      const open = Number(bar.open);
-      const openedAtTarget = annotation.action === 'Buy' ? open >= targetPrice : open <= targetPrice;
-      const openedAtBreakEven = annotation.action === 'Buy' ? open <= entryPrice : open >= entryPrice;
-      if (openedAtTarget) {
-        return completed(barIndex, targetPrice, 'recovery-zero', targetTicks, 'success');
-      }
-      if (openedAtBreakEven) {
-        return completed(barIndex, entryPrice, 'protected-breakeven', 0, 'breakeven');
-      }
-      return ambiguous(barIndex);
+      return completed(barIndex, targetPrice, 'recovery-zero', targetTicks, 'success');
     }
     if (hitTarget) {
       return completed(barIndex, targetPrice, 'recovery-zero', targetTicks, 'success');
     }
     if (hitEntryPrice) {
       return completed(barIndex, entryPrice, 'protected-breakeven', 0, 'breakeven');
+    }
+    if (oppositeColorClose) {
+      const direction = annotation.action === 'Buy' ? 1 : -1;
+      const profitTicks = Math.round(
+        ((Number(bar.close) - entryPrice) * direction) / tickSize
+      );
+      return completed(
+        barIndex,
+        Number(bar.close),
+        'opposite-close',
+        profitTicks,
+        profitTicks > 0 ? 'success' : 'breakeven',
+        false
+      );
     }
   }
 

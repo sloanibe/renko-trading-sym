@@ -126,7 +126,7 @@ Opposite-color definitions:
 
 The opposite-color exit does not wait for price to return to entry. If a Buy reaches at least `+5`, then the first red bar closes while the trade is still `+3`, the trade exits for `+3 ticks`. The remaining session deficit is carried into the next eligible trade within the same session.
 
-The break-even floor remains active at the same time. If price touches entry before the opposite-color bar closes, the trade exits at break-even instead. Consequently, a recovery trade that has armed protection cannot later produce a negative result unless the data contains an unresolved gap or ordering ambiguity.
+The break-even floor remains active at the same time. If price touches entry before the opposite-color bar closes, the trade exits at break-even instead. Under the favorable-first OHLC convention, a recovery trade that has armed protection cannot later produce a negative result.
 
 ## Recovery Examples
 
@@ -164,6 +164,11 @@ flowchart TD
     F -->|Signal and balance >= 0| N[Standard trade]
     F -->|Signal and balance < 0| R[Recovery: unarmed]
 
+    BEST[OHLC tie rule:<br/>assume favorable price movement first]
+    BEST -.applies to.-> N
+    BEST -.applies to.-> R
+    BEST -.applies to.-> A
+
     N -->|+5 ticks first| NW[Exit: target<br/>Add +5]
     N -->|-10 ticks first| NL[Exit: stop<br/>Add -10]
     NW --> F
@@ -187,24 +192,21 @@ flowchart TD
     END --> S
 ```
 
-## Event Priority and OHLC Ambiguity
+## Event Priority and Favorable-First OHLC Assumption
 
-The strategy uses the first event that occurs in actual price order. Range-bar OHLC data does not always reveal that order.
+The strategy uses the first event that occurs in actual price order when that order is available. Range-bar OHLC data does not always reveal which threshold was reached first.
 
-Examples of ambiguity include:
+When a single OHLC bar contains both a favorable and an adverse threshold, assume the favorable price movement occurred first. Do not create a separate unknown outcome.
 
-- A standard trade's target and stop both appearing inside one bar
-- A recovery bar reaching the `+5` protection level and the adverse level inside the same bar
-- A protected recovery bar touching both the recovery target and entry
+This convention produces the following outcomes:
 
-When ordering cannot be established reliably:
+- Standard target and stop in one bar: exit at the favorable `+5` target.
+- Recovery target and stop in one bar: exit at the recovery target.
+- Recovery protection level and an entry/adverse price in one bar: use the most positive ordering. Treat the lower/adverse print as occurring before the favorable run, finish the bar with protection armed, and continue the trade. Do not create a same-bar break-even exit solely because that bar's range includes entry.
+- If the bar that first reaches `+5` subsequently closes at or beyond entry against the trade, the close proves the favorable move reversed before the bar ended; exit at break-even.
+- Protected recovery target and break-even in one bar: exit at the favorable recovery target.
 
-- Record the exit reason as `ambiguous`.
-- Do not invent a favorable or adverse result.
-- Do not alter cumulative P&L for that signal.
-- Show an ambiguity marker so the result can be reviewed manually.
-
-Lower-timeframe or tick data should be used later if exact intrabar sequencing becomes necessary.
+This is an explicit best-case modeling assumption. Lower-timeframe or tick data may replace the assumption later if exact intrabar sequencing becomes available.
 
 ## Chart Display and Exit Reasons
 
@@ -213,7 +215,6 @@ Lower-timeframe or tick data should be used later if exact intrabar sequencing b
 - Green arrow: successful trade
 - Red arrow: stopped or losing trade
 - Neutral dark arrow: break-even trade
-- Orange marker: ambiguous outcome
 - Gray marker or `IGN`: overlapping signal ignored while another trade is open
 - Pending marker: the outcome is not yet known
 
@@ -243,7 +244,6 @@ Suggested reason codes:
 | `BE` | Protected recovery returns to entry | Entry price |
 | `OPP` | First opposite-color close after protection is armed | Opposite-color bar close |
 | `END` | Session divider reached while trade remains open | Last pre-divider bar close |
-| `AMB` | Intrabar event order cannot be determined | Review location |
 
 ## Evaluation Record
 
@@ -257,6 +257,6 @@ Every evaluated signal should retain enough information to explain its result:
 - Exit reason
 - Trade P&L in ticks
 - Session cumulative P&L after exit
-- Whether the outcome was intrabar, close-based, ambiguous, pending, or ignored
+- Whether the outcome was intrabar, close-based, pending, or ignored
 
 This record is the audit trail behind the chart arrows and cumulative labels.

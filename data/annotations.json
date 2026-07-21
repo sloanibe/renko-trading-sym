@@ -1,6 +1,20 @@
 {
   "MESM_reg_5": [
     {
+      "timestamp": "2026-05-06T17:05:21",
+      "barIndex": 63,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7381,
+        "high": 7381.25,
+        "low": 7380,
+        "close": 7381.25,
+        "ema": 7381.4426
+      }
+    },
+    {
       "timestamp": "2026-05-07T06:32:47",
       "barIndex": 650,
       "action": "Sell",
@@ -267,17 +281,17 @@
       }
     },
     {
-      "timestamp": "2026-05-11T06:31:21",
-      "barIndex": 5127,
+      "timestamp": "2026-05-11T06:30:30",
+      "barIndex": 5120,
       "action": "Buy",
       "markerSet": "manual_entry1",
-      "comment": "Approving system signal",
+      "comment": "",
       "metrics": {
-        "open": 7416.75,
-        "high": 7417,
-        "low": 7415.75,
-        "close": 7417,
-        "ema": 7415.0533
+        "open": 7411.25,
+        "high": 7412.5,
+        "low": 7411.25,
+        "close": 7412.5,
+        "ema": 7412.1153
       }
     },
     {
@@ -530,6 +544,608 @@
         "low": 7412,
         "close": 7412,
         "ema": 7413.5805
+      }
+    },
+    {
+      "timestamp": "2026-05-14T06:31:42",
+      "barIndex": 10716,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7488.5,
+        "high": 7488.75,
+        "low": 7487.5,
+        "close": 7488.75,
+        "ema": 7486.8973
+      }
+    },
+    {
+      "timestamp": "2026-05-15T06:40:36",
+      "barIndex": 13977,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "Approving system signal",
+      "metrics": {
+        "open": 7438.5,
+        "high": 7438.75,
+        "low": 7437.5,
+        "close": 7438.75,
+        "ema": 7436.3132
+      }
+    },
+    {
+      "timestamp": "2026-05-17T15:06:31",
+      "barIndex": 16362,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7431,
+        "high": 7431.25,
+        "low": 7430,
+        "close": 7431.25,
+        "ema": 7429.7539
+      }
+    },
+    {
+      "timestamp": "2026-05-18T06:34:49",
+      "barIndex": 19271,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7427.25,
+        "high": 7428.25,
+        "low": 7427,
+        "close": 7427,
+        "ema": 7428.4656
+      }
+    },
+    {
+      "timestamp": "2026-05-19T06:31:05",
+      "barIndex": 24878,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7384.5,
+        "high": 7385.5,
+        "low": 7384.25,
+        "close": 7384.25,
+        "ema": 7386.0407
+      }
+    },
+    {
+      "timestamp": "2026-05-20T06:31:48",
+      "barIndex": 29447,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7393.5,
+        "high": 7394.5,
+        "low": 7393.25,
+        "close": 7393.25,
+        "ema": 7394.4603
+      }
+    },
+    {
+      "timestamp": "2026-05-21T06:31:00",
+      "barIndex": 34194,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7418,
+        "high": 7419,
+        "low": 7417.75,
+        "close": 7417.75,
+        "ema": 7419.3573
+      }
+    },
+    {
+      "timestamp": "2026-05-22T06:30:50",
+      "barIndex": 38228,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7499.5,
+        "high": 7499.75,
+        "low": 7498.5,
+        "close": 7499.75,
+        "ema": 7497.0996
+      }
+    },
+    {
+      "timestamp": "2026-05-24T15:01:52",
+      "barIndex": 39815,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7529.25,
+        "high": 7529.25,
+        "low": 7528,
+        "close": 7529.25,
+        "ema": 7527.5558
+      }
+    },
+    {
+      "timestamp": "2026-05-25T07:22:25",
+      "barIndex": 40339,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7559.75,
+        "high": 7560.75,
+        "low": 7559.5,
+        "close": 7559.5,
+        "ema": 7561.0248
+      }
+    },
+    {
+      "timestamp": "2026-05-26T06:35:00",
+      "barIndex": 41268,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7527,
+        "high": 7528,
+        "low": 7526.75,
+        "close": 7526.75,
+        "ema": 7529.1368
+      }
+    },
+    {
+      "timestamp": "2026-05-27T06:32:12",
+      "barIndex": 42786,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7542.25,
+        "high": 7542.25,
+        "low": 7541,
+        "close": 7541,
+        "ema": 7541.4996
+      }
+    },
+    {
+      "timestamp": "2026-05-28T06:35:14",
+      "barIndex": 45030,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7528.25,
+        "high": 7529.25,
+        "low": 7528,
+        "close": 7528,
+        "ema": 7529.2927
+      }
+    },
+    {
+      "timestamp": "2026-05-29T06:37:50",
+      "barIndex": 46436,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7597,
+        "high": 7597,
+        "low": 7595.75,
+        "close": 7597,
+        "ema": 7595.5354
+      }
+    },
+    {
+      "timestamp": "2026-05-31T15:14:28",
+      "barIndex": 47634,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "Approving system signal",
+      "metrics": {
+        "open": 7592.25,
+        "high": 7592.5,
+        "low": 7591.25,
+        "close": 7592.5,
+        "ema": 7590.4712
+      }
+    },
+    {
+      "timestamp": "2026-06-01T06:31:00",
+      "barIndex": 48272,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7577.5,
+        "high": 7578.5,
+        "low": 7577.25,
+        "close": 7577.25,
+        "ema": 7578.8552
+      }
+    },
+    {
+      "timestamp": "2026-06-02T06:30:50",
+      "barIndex": 49994,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "ema bounce",
+      "metrics": {
+        "open": 7598.5,
+        "high": 7599.5,
+        "low": 7598.25,
+        "close": 7599.5,
+        "ema": 7599.0329
+      }
+    },
+    {
+      "timestamp": "2026-06-03T06:36:13",
+      "barIndex": 51111,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "Approving system signal",
+      "metrics": {
+        "open": 7606.25,
+        "high": 7607.25,
+        "low": 7606,
+        "close": 7606,
+        "ema": 7606.8649
+      }
+    },
+    {
+      "timestamp": "2026-06-04T06:30:06",
+      "barIndex": 53959,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7542.5,
+        "high": 7543.75,
+        "low": 7542.5,
+        "close": 7542.5,
+        "ema": 7544.6404
+      }
+    },
+    {
+      "timestamp": "2026-06-04T06:32:21",
+      "barIndex": 53994,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7550,
+        "high": 7550,
+        "low": 7548.75,
+        "close": 7550,
+        "ema": 7548.4246
+      }
+    },
+    {
+      "timestamp": "2026-06-04T06:40:44",
+      "barIndex": 54059,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7555,
+        "high": 7556,
+        "low": 7554.75,
+        "close": 7554.75,
+        "ema": 7555.3508
+      }
+    },
+    {
+      "timestamp": "2026-06-05T06:36:02",
+      "barIndex": 56177,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7545.5,
+        "high": 7546.5,
+        "low": 7545.25,
+        "close": 7545.25,
+        "ema": 7546.5641
+      }
+    },
+    {
+      "timestamp": "2026-06-07T15:01:41",
+      "barIndex": 59700,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7366.75,
+        "high": 7367,
+        "low": 7365.75,
+        "close": 7367,
+        "ema": 7364.2682
+      }
+    },
+    {
+      "timestamp": "2026-06-08T06:31:24",
+      "barIndex": 63198,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "Approving system signal",
+      "metrics": {
+        "open": 7468.75,
+        "high": 7469,
+        "low": 7467.75,
+        "close": 7469,
+        "ema": 7467.4534
+      }
+    },
+    {
+      "timestamp": "2026-06-08T06:33:01",
+      "barIndex": 63224,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7462,
+        "high": 7463.25,
+        "low": 7462,
+        "close": 7462,
+        "ema": 7463.1267
+      }
+    },
+    {
+      "timestamp": "2026-06-08T06:33:57",
+      "barIndex": 63238,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7454,
+        "high": 7455,
+        "low": 7453.75,
+        "close": 7453.75,
+        "ema": 7455.6474
+      }
+    },
+    {
+      "timestamp": "2026-06-08T06:34:37",
+      "barIndex": 63249,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7448.5,
+        "high": 7449.75,
+        "low": 7448.5,
+        "close": 7448.5,
+        "ema": 7450.1504
+      }
+    },
+    {
+      "timestamp": "2026-06-08T06:35:07",
+      "barIndex": 63259,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7444.75,
+        "high": 7445.75,
+        "low": 7444.5,
+        "close": 7444.5,
+        "ema": 7444.9654
+      }
+    },
+    {
+      "timestamp": "2026-06-09T06:32:36",
+      "barIndex": 68125,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7461,
+        "high": 7461.25,
+        "low": 7460,
+        "close": 7461.25,
+        "ema": 7460.232
+      }
+    },
+    {
+      "timestamp": "2026-06-10T06:30:04",
+      "barIndex": 80782,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7355,
+        "high": 7355.25,
+        "low": 7354,
+        "close": 7355.25,
+        "ema": 7354.6045
+      }
+    },
+    {
+      "timestamp": "2026-06-11T06:30:17",
+      "barIndex": 91424,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7303.25,
+        "high": 7304.25,
+        "low": 7303,
+        "close": 7303,
+        "ema": 7304.8633
+      }
+    },
+    {
+      "timestamp": "2026-06-12T06:30:43",
+      "barIndex": 101910,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7413.5,
+        "high": 7414.5,
+        "low": 7413.25,
+        "close": 7413.25,
+        "ema": 7413.6643
+      }
+    },
+    {
+      "timestamp": "2026-06-14T15:02:54",
+      "barIndex": 107861,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7491.75,
+        "high": 7492.75,
+        "low": 7491.5,
+        "close": 7491.5,
+        "ema": 7492.5356
+      }
+    },
+    {
+      "timestamp": "2026-06-15T06:30:30",
+      "barIndex": 109150,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7538,
+        "high": 7538.25,
+        "low": 7537,
+        "close": 7538.25,
+        "ema": 7536.6271
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:30:44",
+      "barIndex": 111116,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7562.75,
+        "high": 7563,
+        "low": 7561.75,
+        "close": 7563,
+        "ema": 7561.7017
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:33:56",
+      "barIndex": 111140,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7566,
+        "high": 7567,
+        "low": 7565.75,
+        "close": 7567,
+        "ema": 7567.4784
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:45:14",
+      "barIndex": 111197,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7565.25,
+        "high": 7565.75,
+        "low": 7564.5,
+        "close": 7564.5,
+        "ema": 7564.8694
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:50:20",
+      "barIndex": 111217,
+      "action": "Buy",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7567.5,
+        "high": 7568,
+        "low": 7566.75,
+        "close": 7568,
+        "ema": 7568.3004
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:54:25",
+      "barIndex": 111228,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7566.5,
+        "high": 7567.5,
+        "low": 7566.25,
+        "close": 7566.25,
+        "ema": 7566.2906
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:57:03",
+      "barIndex": 111236,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "Approving system signal",
+      "metrics": {
+        "open": 7563,
+        "high": 7564,
+        "low": 7562.75,
+        "close": 7562.75,
+        "ema": 7563.7806
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:59:24",
+      "barIndex": 111247,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7560,
+        "high": 7561.25,
+        "low": 7560,
+        "close": 7560,
+        "ema": 7560.9403
+      }
+    },
+    {
+      "timestamp": "2026-06-16T06:59:54",
+      "barIndex": 111250,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7557.25,
+        "high": 7558.25,
+        "low": 7557,
+        "close": 7557,
+        "ema": 7559.1756
+      }
+    },
+    {
+      "timestamp": "2026-06-17T06:30:13",
+      "barIndex": 113431,
+      "action": "Sell",
+      "markerSet": "manual_entry1",
+      "comment": "",
+      "metrics": {
+        "open": 7523.75,
+        "high": 7524.75,
+        "low": 7523.5,
+        "close": 7523.5,
+        "ema": 7524.107
       }
     }
   ]
